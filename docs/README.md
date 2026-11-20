@@ -2,6 +2,10 @@
 
 This folder contains developer-focused documentation (architecture, implementation details, and validation steps).
 
+## Development workflow
+
+Start with [AGENTS.md](../AGENTS.md). See [DESIGN.md](../DESIGN.md) for UI, [TEST.md](../TEST.md) for validation, [ERROR.md](../ERROR.md) for troubleshooting, and the [release guide](RELEASE_GUIDE.md) for current publishing status.
+
 ## Proxy
 - [`docs/proxy/auth.md`](proxy/auth.md) — proxy authorization modes, expected client behavior, and implementation pointers.
 - [`docs/proxy/accounts.md`](proxy/accounts.md) — account lifecycle in the proxy pool (including auto-disable on `invalid_grant`) and UI behavior.

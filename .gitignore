@@ -56,9 +56,16 @@ scripts/probe_weekly.py
 scripts/probe_quota_summary.py
 pnpm-lock.yaml
 
-# Dot-directories: ignore all hidden directories, but keep .github (CI/CD workflows)
+# Keep CI and the repository's shared Git skill; ignore other hidden directories.
 .*/
 !.github/
+!/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/git-commit/
+/.agents/skills/git-commit/*
+!/.agents/skills/git-commit/SKILL.md
 
 # Traffic dumps & Temporary analysis reports (prevent pushing to GitHub)
 flows*
