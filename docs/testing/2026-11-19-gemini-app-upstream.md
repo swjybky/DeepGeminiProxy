@@ -1,0 +1,20 @@
+# 内置 Gemini App 上游验收记录
+
+目标：在新建账号的 Gemini App Tab 中独立授权、管理账号；`gemini-app-*` 走进程内 Robin 上游，普通反重力模型保持原有路径。
+
+环境：macOS arm64；OAuth 使用合成回调与私有临时目录，gRPC 使用本机随机回环端口和合成 HTTP/2 帧。没有登录真实账号，也没有调用 Google。
+
+| 验证 | 结果 |
+| --- | --- |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked --lib proxy::upstream::gemini_app` | 9 项通过：OAuth 状态与 PKCE、独立存储和重授权、模型分流、请求限制、gRPC 帧与 trailer、流式终态。 |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked --lib proxy::common::model_gate::tests` | 14 项通过。 |
+| `cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check`、`npm run build`、`git diff --check` | 通过。 |
+| 已运行的 Tauri 开发版 HTTP 冒烟 | `/health` 返回 `200`；匿名访问 `/api/accounts/gemini-app` 返回 `401`。 |
+
+默认 OAuth 配置回归：同一 Gemini App 模块重跑后 12 项通过。合成配置覆盖无运行时配置时的默认值、完整覆盖、残缺覆盖不混用，以及实际本机监听器接收拒绝回调后不写账号文件。`cargo fmt --check` 和 `git diff --check` 通过。
+
+本机 App2API 模式：定向 Rust 测试 15 项通过。用随机回环端口的合成网关验证 Chat Completions 与 Responses 的模型映射、独立网关 key、SSE 首段在终态前交付、401 映射、地址限制，以及切换模式后不读取或改写旧授权。前端 `npm run build` 通过。
+
+`v1.0.1` 发布候选：在隔离数据目录启动 macOS 无头构建。`/health` 返回 `200`，匿名账号请求返回 `401`，鉴权后账号列表为空、网关状态未配置，未配置 OAuth 时发起登录返回 `503 oauth_profile_required` 且不写账号文件。`variant_mapping` 和 `official_alignment_tests` 分别仍有 6 项和 4 项失败；在 `v1.0.0` 上复现了同样的失败。
+
+未覆盖：未启动真实 App2API、登录 Google、调用真实模型，未验证 Tauri 控件路径或目标 SDK。截图基线未能获取，未做浅色、深色及窄窗口的视觉验收。启用方式见[上游接入说明](../proxy/gemini-app.md)。

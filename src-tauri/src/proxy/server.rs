@@ -87,6 +87,7 @@ pub fn take_pending_delete_accounts() -> Vec<String> {
 /// Axum 应用状态
 #[derive(Clone)]
 pub struct AppState {
+    pub(crate) gemini_app: Option<Arc<crate::proxy::upstream::gemini_app::GeminiApp>>,
     pub token_manager: Arc<TokenManager>,
     pub custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     pub request_timeout: u64, // API 请求超时(秒)
@@ -424,6 +425,7 @@ fn to_account_response(
 /// Axum 服务器实例
 #[derive(Clone)]
 pub struct AxumServer {
+    gemini_app: Option<Arc<crate::proxy::upstream::gemini_app::GeminiApp>>,
     cancel_token: tokio_util::sync::CancellationToken,
     pub(crate) port: u16,
     custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
@@ -453,12 +455,19 @@ impl AxumServer {
         *self.enabled_models.write().await = config.enabled_models.clone();
     }
 
-    pub async fn model_catalog(&self) -> Vec<String> {
+    pub(crate) fn has_gemini_app(&self) -> bool {
+        self.gemini_app
+            .as_ref()
+            .is_some_and(|pool| pool.available())
+    }
+
+    pub async fn model_catalog(&self) -> Vec<crate::proxy::common::model_catalog::ModelGroup> {
         let only_raw = *self.only_raw_quota_models.read().await;
-        crate::proxy::common::model_mapping::get_all_dynamic_models(
+        proxy_model_catalog(
             &self.custom_mapping,
-            Some(&self.token_manager),
+            &self.token_manager,
             only_raw,
+            self.has_gemini_app(),
         )
         .await
     }
@@ -593,7 +602,15 @@ impl AxumServer {
         // Keep the bound port for status reporting, including auto-assigned ports.
         let listener = bind_tcp_listener(&host, port)?;
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
+        let gemini_app = match crate::proxy::upstream::gemini_app::GeminiApp::shared() {
+            Ok(configured) => Some(configured),
+            Err(message) => {
+                tracing::warn!("Gemini App upstream disabled: {}", message);
+                None
+            }
+        };
         let state = AppState {
+            gemini_app,
             token_manager: token_manager.clone(),
             custom_mapping: custom_mapping_state.clone(),
             request_timeout,
@@ -905,6 +922,27 @@ impl AxumServer {
                 "/proxy/preferred-account",
                 get(admin_get_preferred_account).post(admin_set_preferred_account),
             )
+            .route(
+                "/accounts/gemini-app",
+                get(crate::commands::gemini_app::web_list),
+            )
+            .route(
+                "/accounts/gemini-app/gateway-status",
+                get(crate::commands::gemini_app::web_gateway_status),
+            )
+            .route(
+                "/accounts/gemini-app/:id",
+                delete(crate::commands::gemini_app::web_remove),
+            )
+            .route(
+                "/accounts/gemini-app/login",
+                post(crate::commands::gemini_app::web_start),
+            )
+            .route(
+                "/accounts/gemini-app/login/:id",
+                get(crate::commands::gemini_app::web_status)
+                    .delete(crate::commands::gemini_app::web_cancel),
+            )
             .route("/accounts/oauth/prepare", post(admin_prepare_oauth_url))
             .route("/accounts/oauth/start", post(admin_start_oauth_login))
             .route("/accounts/oauth/complete", post(admin_complete_oauth_login))
@@ -1148,6 +1186,7 @@ impl AxumServer {
         let cancel_token = tokio_util::sync::CancellationToken::new();
 
         let server_instance = Self {
+            gemini_app: state.gemini_app.clone(),
             cancel_token: cancel_token.clone(),
             port,
             custom_mapping: custom_mapping_state.clone(),
@@ -2226,13 +2265,44 @@ async fn admin_get_proxy_status(
     })))
 }
 
-async fn admin_get_proxy_model_catalog(State(state): State<AppState>) -> Json<Vec<String>> {
+async fn proxy_model_catalog(
+    custom_mapping: &RwLock<std::collections::HashMap<String, String>>,
+    token_manager: &TokenManager,
+    only_raw: bool,
+    has_gemini_app: bool,
+) -> Vec<crate::proxy::common::model_catalog::ModelGroup> {
+    use crate::proxy::upstream::gemini_app;
+    let mut models = crate::proxy::common::model_mapping::get_all_dynamic_models(
+        custom_mapping,
+        Some(token_manager),
+        only_raw,
+    )
+    .await;
+    models.retain(|id| !gemini_app::is_app_model_id(id));
+    if has_gemini_app {
+        models.extend(
+            gemini_app::MODELS
+                .iter()
+                .map(|model| model.public.to_owned()),
+        );
+    }
+    let aliases = custom_mapping.read().await;
+    crate::proxy::common::model_catalog::group_models(models, &aliases)
+}
+
+async fn admin_get_proxy_model_catalog(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::proxy::common::model_catalog::ModelGroup>> {
     let only_raw = *state.only_raw_quota_models.read().await;
     Json(
-        crate::proxy::common::model_mapping::get_all_dynamic_models(
+        proxy_model_catalog(
             &state.custom_mapping,
-            Some(&state.token_manager),
+            &state.token_manager,
             only_raw,
+            state
+                .gemini_app
+                .as_ref()
+                .is_some_and(|pool| pool.available()),
         )
         .await,
     )

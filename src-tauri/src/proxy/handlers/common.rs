@@ -200,11 +200,26 @@ pub async fn collect_model_list_entries(
     let only_raw = *state.only_raw_quota_models.read().await;
     let mut model_ids =
         get_all_dynamic_models(&state.custom_mapping, Some(&state.token_manager), only_raw).await;
+    model_ids.retain(|id| !crate::proxy::upstream::gemini_app::is_app_model_id(id));
+    let groups = if only_raw {
+        None
+    } else {
+        let aliases = state.custom_mapping.read().await;
+        Some(crate::proxy::common::model_catalog::group_models(
+            std::mem::take(&mut model_ids),
+            &aliases,
+        ))
+    };
     {
         let enabled_models = state.enabled_models.read().await;
-        model_ids.retain(|id| {
+        let is_enabled = |id: &str| {
             crate::proxy::common::model_gate::is_model_enabled(enabled_models.as_deref(), id)
-        });
+        };
+        if let Some(groups) = groups {
+            model_ids = crate::proxy::common::model_catalog::discoverable_ids(groups, is_enabled);
+        } else {
+            model_ids.retain(|id| is_enabled(id));
+        }
     }
     if model_ids.is_empty() {
         return Vec::new();

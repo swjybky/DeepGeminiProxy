@@ -3,6 +3,12 @@
 > DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.1 (2026-11-19)**:
+        -   新增独立的 Gemini App 账号池和模型路由。Chat Completions 与 Responses 可接入本机 App2API；内置直接授权需要获准的 OAuth 配置。
+        -   修复反重力模型目录冷启动时缺少档位的问题，并按模型系列整理白名单；未指定档位时优先选择可用的 High 档。
+        -   修复 macOS 上 DeepWrite 同步的 API Key 解密问题。受影响的用户更新后可关闭再开启 DeepWrite 接入，重新写入密钥。
+        -   改善账号页筛选和仪表盘展示，并在启动时修复异常偏小的主窗口。
+
     *   **v1.0.0 (DeepGeminiProxy 首个独立版本)**:
         -   DeepGeminiProxy 从 `1.0.0` 独立编号，并从本项目的 GitHub Releases 检查更新。旧版本记录保留用于上游溯源。
         -   新增独立的 Agent 工具页面，集中管理客户端同步，支持在 macOS 上接入 DeepWrite。

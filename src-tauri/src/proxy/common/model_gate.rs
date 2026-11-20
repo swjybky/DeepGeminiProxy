@@ -266,7 +266,9 @@ pub async fn gate_inbound_model(
     enabled_models: &RwLock<Option<Vec<String>>>,
 ) -> ModelGate {
     let requested = requested_model.map(str::trim).unwrap_or("");
-    if requested.is_empty() || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
+    if requested.is_empty()
+        || crate::proxy::upstream::gemini_app::is_app_model_id(requested)
+        || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
     {
         return ModelGate::NotFound;
     }
@@ -279,6 +281,10 @@ pub async fn gate_inbound_model(
     };
     let final_model =
         model_mapping::resolve_adaptive_target(&raw_target, requested, None, Some(token_manager));
+
+    if crate::proxy::upstream::gemini_app::is_app_model_id(&final_model) {
+        return ModelGate::NotFound;
+    }
 
     // 已下线模型族硬门禁：检查 **映射后的真实出站模型**，
     // 允许用户把已下线的旧名作为别名键映射到合规模型。
@@ -383,7 +389,9 @@ pub async fn gate_inbound_model_exists(
     enabled_models: &RwLock<Option<Vec<String>>>,
 ) -> ModelGate {
     let requested = requested_model.map(str::trim).unwrap_or("");
-    if requested.is_empty() || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
+    if requested.is_empty()
+        || crate::proxy::upstream::gemini_app::is_app_model_id(requested)
+        || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
     {
         return ModelGate::NotFound;
     }
@@ -394,6 +402,10 @@ pub async fn gate_inbound_model_exists(
     };
     let final_model =
         model_mapping::resolve_adaptive_target(&raw_target, requested, None, Some(token_manager));
+
+    if crate::proxy::upstream::gemini_app::is_app_model_id(&final_model) {
+        return ModelGate::NotFound;
+    }
 
     // 检查映射后的真实出站模型，允许旧名作为自定义别名键。
     if is_retired_model_id(&final_model) {

@@ -1,23 +1,33 @@
-import { Check, RefreshCw } from 'lucide-react';
+import { Check, Minus, RefreshCw } from 'lucide-react';
+import { useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { create } from 'zustand';
 import { cn } from '../../utils/cn';
 import { request } from '../../utils/request';
 
-const MODEL_CATALOG_CACHE_KEY = 'antigravity_proxy_model_catalog';
+const MODEL_CATALOG_CACHE_KEY = 'antigravity_proxy_model_catalog_groups_v2';
+
+interface ModelGroup {
+    id: string;
+    members: string[];
+}
 
 interface ModelCatalogState {
-    catalog: string[] | null;
+    catalog: ModelGroup[] | null;
     loading: boolean;
     error: string | null;
     refresh: () => Promise<void>;
 }
 
-function isModelCatalog(value: unknown): value is string[] {
-    return Array.isArray(value) && value.every((id) => typeof id === 'string');
+function isModelCatalog(value: unknown): value is ModelGroup[] {
+    return Array.isArray(value) && value.every((group) =>
+        group !== null && typeof group === 'object' && typeof group.id === 'string'
+        && Array.isArray(group.members) && group.members.every((member: unknown) => typeof member === 'string')
+        && group.members.includes(group.id),
+    );
 }
 
-function readCachedCatalog(): string[] | null {
+function readCachedCatalog(): ModelGroup[] | null {
     try {
         const saved = localStorage.getItem(MODEL_CATALOG_CACHE_KEY);
         const catalog: unknown = saved === null ? null : JSON.parse(saved);
@@ -61,18 +71,22 @@ interface EnabledModelsPanelProps {
 export default function EnabledModelsPanel({ value, dirty, disabled, onChange }: EnabledModelsPanelProps) {
     const { t } = useTranslation();
     const { catalog, loading, error, refresh } = useModelCatalog();
-    const enabled = new Set(value?.map((id) => id.toLowerCase()));
-    const modelIds = [...new Map(
-        (catalog ?? value ?? []).map((id) => [id.toLowerCase(), id]),
-    ).values()].sort();
-    const visibleEnabledCount = modelIds.filter((id) => enabled.has(id.toLowerCase())).length;
+    useEffect(() => {
+        if (catalog === null && !error) void refresh();
+    }, [catalog, error, refresh]);
+
+    const groups = catalog ?? [];
+    const normalize = (id: string) => id.trim().replace(/^models\//, '').toLowerCase();
+    const enabled = new Set(value?.map(normalize));
+    const isEnabled = (id: string) => value === null || enabled.has(normalize(id));
+    const visibleEnabledCount = groups.filter(({ members }) => members.some(isEnabled)).length;
     const controlsDisabled = disabled || loading;
 
-    const toggleModel = (id: string) => {
-        const selected = value === null ? modelIds : value;
-        onChange(value === null || enabled.has(id.toLowerCase())
-            ? selected.filter((model) => model.toLowerCase() !== id.toLowerCase())
-            : [...selected, id].sort());
+    const toggleModel = (group: ModelGroup) => {
+        const selected = value ?? groups.flatMap(({ members }) => members);
+        const groupIds = new Set(group.members.map(normalize));
+        const others = selected.filter((id) => !groupIds.has(normalize(id)));
+        onChange(group.members.every(isEnabled) ? others : [...others, ...group.members].sort());
     };
 
     return (
@@ -87,7 +101,7 @@ export default function EnabledModelsPanel({ value, dirty, disabled, onChange }:
                             {t('proxy.config.enabled_models.enable_all')}
                         </button>
                     )}
-                    {(value === null ? modelIds.length > 0 : value.length > 0) && (
+                    {(value === null ? groups.length > 0 : value.length > 0) && (
                         <button type="button" disabled={controlsDisabled} onClick={() => onChange([])} className="btn btn-ghost btn-xs">
                             {t('proxy.config.enabled_models.disable_all')}
                         </button>
@@ -99,12 +113,19 @@ export default function EnabledModelsPanel({ value, dirty, disabled, onChange }:
                 </div>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400" role="status">
-                {dirty
-                    ? t('proxy.config.enabled_models.unsaved')
-                    : value === null
-                        ? t('proxy.config.enabled_models.all_enabled')
-                        : t('proxy.config.enabled_models.selected', { count: visibleEnabledCount })}
+                {loading && catalog === null
+                    ? t('proxy.config.enabled_models.loading')
+                    : dirty
+                        ? t('proxy.config.enabled_models.unsaved')
+                        : value === null
+                            ? t('proxy.config.enabled_models.all_enabled')
+                            : catalog !== null && t('proxy.config.enabled_models.selected', { count: visibleEnabledCount })}
             </p>
+            {groups.some(({ members }) => members.length > 1) && (
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {t('proxy.config.enabled_models.grouping_hint')}
+                </p>
+            )}
             {error && (
                 <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">
                     {t('proxy.config.enabled_models.fetch_failed', { error })}
@@ -113,26 +134,29 @@ export default function EnabledModelsPanel({ value, dirty, disabled, onChange }:
             {catalog?.length === 0 && (
                 <p className="text-xs text-gray-500 dark:text-gray-400">{t('proxy.config.enabled_models.empty')}</p>
             )}
-            {modelIds.length > 0 && (
+            {groups.length > 0 && (
                 <div role="group" aria-labelledby="enabled-models-title" aria-busy={loading} className="flex flex-wrap gap-1.5">
-                    {modelIds.map((id) => {
-                        const active = value === null || enabled.has(id.toLowerCase());
+                    {groups.map((group) => {
+                        const active = group.members.every(isEnabled);
+                        const partial = !active && group.members.some(isEnabled);
                         return (
                             <button
-                                key={id}
+                                key={group.id}
                                 type="button"
-                                aria-pressed={active}
+                                role="checkbox"
+                                aria-checked={partial ? 'mixed' : active}
                                 disabled={controlsDisabled}
-                                onClick={() => toggleModel(id)}
+                                onClick={() => toggleModel(group)}
                                 className={cn(
                                     'inline-flex items-center gap-1 max-w-full rounded-full border px-2.5 py-1 text-xs font-mono break-all transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-500 disabled:opacity-60',
-                                    active
+                                    (active || partial)
                                         ? 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
                                         : 'border-gray-200 bg-gray-50 text-gray-500 hover:border-gray-400 dark:border-base-300 dark:bg-base-200 dark:text-gray-400',
                                 )}
                             >
                                 {active && <Check size={12} aria-hidden="true" className="shrink-0" />}
-                                {id}
+                                {partial && <Minus size={12} aria-hidden="true" className="shrink-0" />}
+                                {group.id}
                             </button>
                         );
                     })}

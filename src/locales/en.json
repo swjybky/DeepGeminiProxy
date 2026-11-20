@@ -4,9 +4,6 @@
         "tag": "Recommended",
         "desc": "Client-direct control and custom token tiers are retired: models exposing thinkingLevel take their level from the model tier (low / medium / high), while other models follow the official thinkingBudget default. Client-provided effort only applies to bare (suffix-less) models to pick the concrete tier model."
     },
-    "hub_update": {
-        "available": "antigravity hub latest: {{version}} — ignore if requests are working normally"
-    },
     "common": {
         "loading": "Loading...",
         "empty": "Empty",
@@ -267,6 +264,9 @@
         "edit_label": "Edit Label",
         "activation": {
             "title": "Launch Antigravity with this account",
+            "action": "Switch Account and Launch",
+            "select_client": "Choose a client to launch",
+            "confirm": "Confirm Launch",
             "current_account": "Signed in to this account",
             "signed_in_as": "Signed in as {{email}}",
             "no_account": "No sign-in detected"
@@ -428,6 +428,37 @@
                 "oauth": "OAuth",
                 "token": "Refresh Token",
                 "import": "Import DB"
+            },
+            "gemini_app": {
+                "description": "Google authorization adds the account to the separate Gemini App proxy pool.",
+                "gateway_description": "Local App2API is configured. Use its admin page to sign in with Google, manage accounts, and test models. DeepGeminiProxy does not store these Google grants.",
+                "gateway_config_invalid": "App2API configuration is invalid. Check the gateway API key and loopback address in DeepGeminiProxy's environment, then restart.",
+                "web_hint": "Open this page on the gateway machine for the local authorization callback.",
+                "start": "Sign in with Google",
+                "open_google": "Open Google sign-in",
+                "waiting": "Waiting for Google authorization…",
+                "success": "Account added to the Gemini App pool. Model access has not been verified.",
+                "pool": "Gemini App accounts",
+                "manage_pool": "Manage Gemini App accounts",
+                "automatic_pool": "The proxy selects from this separate pool automatically; no account is fixed as current.",
+                "no_ranking": "These accounts are authorized but not ranked by quota. Model access depends on the upstream response.",
+                "none_authorized": "No authorized Gemini App accounts.",
+                "empty": "No Gemini App accounts yet.",
+                "authorized": "Authorized",
+                "needs_login": "Sign-in required",
+                "remove": "Remove",
+                "confirm_remove": "Remove this account from the Gemini App pool?",
+                "errors": {
+                    "oauth_profile_required": "Configure a Google OAuth client and scope authorized for Gemini App, then restart DeepGeminiProxy.",
+                    "oauth_profile_invalid": "The Gemini App OAuth profile is invalid.",
+                    "oauth_login_pending": "A Gemini App sign-in is already in progress.",
+                    "copy_failed": "Could not copy the authorization link. Open the Google sign-in page instead.",
+                    "oauth_timeout": "Google authorization timed out. Start again.",
+                    "oauth_denied": "Google authorization was denied.",
+                    "oauth_token_rejected": "Google rejected the OAuth token exchange. Check the OAuth client configuration.",
+                    "oauth_refresh_token_missing": "Google did not issue a refresh token. Check that the OAuth client allows offline access.",
+                    "request_failed": "Gemini App operation failed. Please try again or check the OAuth configuration."
+                }
             },
             "oauth": {
                 "enterprise_title": "Google Cloud / Vertex AI Authorization",
@@ -920,6 +951,8 @@
                 "enable_all": "Enable all",
                 "disable_all": "Disable all",
                 "all_enabled": "All models are enabled by default, including newly discovered models.",
+                "grouping_hint": "Reasoning levels are grouped by model. Choose a level in your API request. A minus sign means only some levels are enabled; click to enable the entire group.",
+                "loading": "Fetching model list…",
                 "selected_one": "{{count}} model enabled",
                 "selected_other": "{{count}} models enabled",
                 "unsaved": "Click Save to apply your model selection.",
@@ -1622,7 +1655,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent Integrations",
-                "deepwrite_hint": "Quit DeepWrite (⌘Q) first. Connecting adds Gemini models to the DeepGemini group under Custom Models.",
+                "deepwrite_hint": "No need to quit DeepWrite. Connecting adds Gemini models to the DeepGemini group under Custom Models.",
                 "description": "Turn on an integration to configure its gateway connection and models.",
                 "connection_changed": "Configuration changed",
                 "key_required": "Set a gateway API key to enable Agent integrations.",

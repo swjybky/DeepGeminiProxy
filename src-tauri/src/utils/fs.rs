@@ -61,7 +61,18 @@ fn atomic_replace_file(src: &Path, dst: &Path) -> Result<(), String> {
 /// 3. Replace target file via atomic rename (`MoveFileExW` with `MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH` on Windows, `fs::rename` on POSIX).
 /// 4. If any step fails, remove the temporary file.
 pub fn write_atomic<P: AsRef<Path>>(target_path: P, content: &[u8]) -> Result<(), String> {
-    let target = target_path.as_ref();
+    write_atomic_with_permissions(target_path.as_ref(), content, false)
+}
+
+pub(crate) fn write_private_atomic(target: &Path, content: &[u8]) -> Result<(), String> {
+    write_atomic_with_permissions(target, content, true)
+}
+
+fn write_atomic_with_permissions(
+    target: &Path,
+    content: &[u8],
+    private: bool,
+) -> Result<(), String> {
     let parent_dir = target
         .parent()
         .ok_or_else(|| "Target path has no parent directory".to_string())?;
@@ -73,8 +84,19 @@ pub fn write_atomic<P: AsRef<Path>>(target_path: P, content: &[u8]) -> Result<()
     let temp_filename = format!("{}.tmp.{}", file_name, Uuid::new_v4());
     let temp_path: PathBuf = parent_dir.join(temp_filename);
 
-    let mut file = File::create(&temp_path)
-        .map_err(|e| format!("Failed to create temporary file {:?}: {}", temp_path, e))?;
+    let mut file = if private {
+        let mut options = File::options();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        options.open(&temp_path)
+    } else {
+        File::create(&temp_path)
+    }
+    .map_err(|e| format!("Failed to create temporary file {:?}: {}", temp_path, e))?;
 
     if let Err(e) = file.write_all(content) {
         let _ = std::fs::remove_file(&temp_path);

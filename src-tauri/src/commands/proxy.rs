@@ -194,7 +194,15 @@ pub async fn internal_start_proxy_service(
     // 3. 加載賬號
     let active_accounts = token_manager.load_accounts().await.unwrap_or(0);
 
-    if active_accounts == 0 {
+    let mut instance_lock = state.instance.write().await;
+    let admin_lock = state.admin_server.read().await;
+    let axum_server = admin_lock
+        .as_ref()
+        .expect("admin server must exist after ensure_admin_server")
+        .axum_server
+        .clone();
+
+    if active_accounts == 0 && !axum_server.has_gemini_app() {
         tracing::warn!("沒有可用賬號，反代邏輯將暫停，請通過管理界面添加。");
         return Ok(ProxyStatus {
             running: false,
@@ -204,14 +212,6 @@ pub async fn internal_start_proxy_service(
             active_accounts: 0,
         });
     }
-
-    let mut instance_lock = state.instance.write().await;
-    let admin_lock = state.admin_server.read().await;
-    let axum_server = admin_lock
-        .as_ref()
-        .expect("admin server must exist after ensure_admin_server")
-        .axum_server
-        .clone();
 
     // 创建服务实例（逻辑启动）。不再保存假的 server_handle：
     // 监听任务的真实句柄已由 AdminServerInstance 持有（见 ensure_admin_server）。
@@ -411,7 +411,7 @@ pub async fn get_proxy_status(state: State<'_, ProxyServiceState>) -> Result<Pro
 #[tauri::command]
 pub async fn get_proxy_model_catalog(
     state: State<'_, ProxyServiceState>,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<crate::proxy::common::model_catalog::ModelGroup>, String> {
     let server = state
         .admin_server
         .read()
@@ -423,12 +423,17 @@ pub async fn get_proxy_model_catalog(
     }
 
     let config = crate::modules::config::load_app_config()?.proxy;
-    Ok(crate::proxy::common::model_mapping::get_all_dynamic_models(
-        &tokio::sync::RwLock::new(config.custom_mapping),
+    let mapping = tokio::sync::RwLock::new(config.custom_mapping);
+    let ids = crate::proxy::common::model_mapping::get_all_dynamic_models(
+        &mapping,
         None,
         config.only_raw_quota_models,
     )
-    .await)
+    .await;
+    let aliases = mapping.read().await;
+    Ok(crate::proxy::common::model_catalog::group_models(
+        ids, &aliases,
+    ))
 }
 
 /// 获取反代服务统计
@@ -1008,7 +1013,7 @@ pub async fn get_hub_fingerprint() -> Result<crate::modules::hub_version::HubFin
     Ok(crate::modules::hub_version::get_current_hub_fingerprint())
 }
 
-/// 官方 Hub 版本更新提示（仅提示，**不改变**出站指纹）
+/// 官方 Hub 版本查询结果（不改变出站指纹）
 #[derive(serde::Serialize)]
 pub struct HubUpdateStatus {
     /// 当前硬编码校准版本
@@ -1021,8 +1026,8 @@ pub struct HubUpdateStatus {
 
 /// 检查官方 Hub 是否发布了比当前校准基线更新的版本。
 ///
-/// 仅供前端启动时的小提示使用：出站 UA 仍使用硬编码的版本 + CL 配对，
-/// 因为 CL 无法从任何公开端点获取，自动跟随版本号只会造成版本/CL 不一致。
+/// 供代理设置页参考。查询不修改出站 UA，因为 CL 无法从公开端点获取，
+/// 单独更新版本号会导致版本/CL 不一致。
 #[tauri::command]
 pub async fn check_hub_update() -> HubUpdateStatus {
     let current = crate::constants::OFFICIAL_HUB_VERSION.to_string();

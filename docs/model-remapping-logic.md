@@ -4,6 +4,13 @@
 
 本文描述当前代理中的模型重映射链路（含 Gemini 3/3.1 Pro 调整后的行为）。
 
+## 模型聚合与思考档位
+
+「启用模型」与默认 API 模型列表从当前可用的模型 ID 聚合，不要求启动后先同步官方目录。只把 `-low`、`-medium`、`-high`、`-xhigh` 等思考档位收进同组；只有一个档位（例如 `gpt-oss-120b-medium`）也不会和基础名重复显示。`-tiered` 是独立入口，其自有档位归入该入口；自定义别名和生图尺寸不按思考档位合并。
+
+- 使用 `gemini-3.8-flash` 时，可用 OpenAI `reasoning_effort`、Anthropic `output_config.effort` 或 Gemini `generationConfig.thinkingConfig.thinkingLevel` 选择档位；未指定时优先使用存在的 `high` 档。显式调用已启用的具名档位仍然有效。
+- 旧配置不自动扩充白名单。仅启用了部分档位时，设置页标记为部分启用；点击可启用整组。若基础名没有启用，默认 API 列表仍显示白名单实际允许的具名档位。启用「仅暴露真实配额模型」时，API 保留该模式的未聚合列表。
+
 ## 1）整体流程
 
 无论是 OpenAI 协议还是 Gemini 原生协议，请求模型都会经过两段处理：

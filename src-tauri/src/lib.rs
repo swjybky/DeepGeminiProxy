@@ -496,8 +496,7 @@ pub fn run() {
                     }
 
                     // Initialize Hub fingerprint from config or hardcoded calibration baseline.
-                    // 注意：启动阶段**不做**远程版本跟随——CL 无法自动获取，版本与 CL 必须成对，
-                    // 远程探测仅用于前端启动提示（check_hub_update）。
+                    // 注意：启动阶段不做远程版本跟随，CL 无法自动获取且必须与版本配对。
                     crate::modules::hub_version::update_hub_fingerprint(
                         config.proxy.hub_version.as_deref(),
                         config.proxy.hub_cl.as_deref(),
@@ -784,6 +783,12 @@ pub fn run() {
             commands::get_config,
             commands::save_config,
             // Additional commands
+            commands::gemini_app::gemini_app_accounts,
+            commands::gemini_app::gemini_app_gateway_status,
+            commands::gemini_app::gemini_app_login_start,
+            commands::gemini_app::gemini_app_login_status,
+            commands::gemini_app::gemini_app_login_cancel,
+            commands::gemini_app::gemini_app_account_remove,
             commands::prepare_oauth_url,
             commands::start_oauth_login,
             commands::complete_oauth_login,

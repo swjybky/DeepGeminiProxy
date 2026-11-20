@@ -32,8 +32,11 @@ import { isTauri } from "../utils/env";
 import { request as invoke } from "../utils/request";
 import { useTranslation } from "react-i18next";
 import { motion } from "framer-motion";
+import { useSearchParams } from "react-router-dom";
+import { useGeminiAppAccounts } from "../stores/useGeminiAppAccounts";
+import { GeminiAppAccountInfo } from "../components/accounts/GeminiAppAccountInfo";
 
-type FilterType = "all" | "pro" | "ultra" | "enterprise" | "free";
+type FilterType = "all" | "pro" | "ultra" | "enterprise" | "free" | "gemini-app";
 type ViewMode = "list" | "grid";
 
 
@@ -65,7 +68,25 @@ function Accounts() {
   const { config } = useConfigStore();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<FilterType>('all');
+  const [searchParams] = useSearchParams();
+  const requestedPool = searchParams.get('pool');
+  const [filter, setFilter] = useState<FilterType>(() => requestedPool === 'gemini-app' ? 'gemini-app' : 'all');
+  const appAccounts = useGeminiAppAccounts(state => state.accounts);
+  const refreshAppAccounts = useGeminiAppAccounts(state => state.refresh);
+  const removeAppAccount = useGeminiAppAccounts(state => state.remove);
+  const [appDeleteId, setAppDeleteId] = useState<string | null>(null);
+  const [removingApp, setRemovingApp] = useState(false);
+  const appLoadError = useGeminiAppAccounts(state => state.loadFailed);
+  const appOnly = filter === 'gemini-app';
+  useEffect(() => {
+    if (requestedPool === 'gemini-app') setFilter('gemini-app');
+  }, [requestedPool]);
+  useEffect(() => {
+    const refresh = () => { void refreshAppAccounts().catch(() => {}); };
+    refresh();
+    window.addEventListener('focus', refresh);
+    return () => window.removeEventListener('focus', refresh);
+  }, [refreshAppAccounts]);
   const [importProgress, setImportProgress] = useState<{
     current: number;
     total: number;
@@ -299,16 +320,20 @@ function Accounts() {
     return accounts.filter((a) => a.email.toLowerCase().includes(lowQuery));
   }, [accounts, searchQuery]);
 
+  const searchedAppAccounts = useMemo(() => appAccounts.filter(a => a.email.toLowerCase().includes(searchQuery.toLowerCase())), [appAccounts, searchQuery]);
+  const filteredAppAccounts = filter === 'all' || appOnly ? searchedAppAccounts : [];
+  const appPrefix = 'accounts.add.gemini_app';
+
   // 计算各筛选状态下的数量 (基于搜索结果)
   const filterCounts = useMemo(() => {
     return {
-      all: searchedAccounts.length,
+      all: searchedAccounts.length + searchedAppAccounts.length,
       pro: searchedAccounts.filter((a) => getAccountTier(a) === "pro").length,
       ultra: searchedAccounts.filter((a) => getAccountTier(a) === "ultra").length,
       enterprise: searchedAccounts.filter((a) => getAccountTier(a) === "enterprise").length,
       free: searchedAccounts.filter((a) => getAccountTier(a) === "free").length,
     };
-  }, [searchedAccounts]);
+  }, [searchedAccounts, searchedAppAccounts.length]);
 
   // 过滤和搜索最终结果
   const filteredAccounts = useMemo(() => {
@@ -326,6 +351,15 @@ function Accounts() {
     ];
     return orderedAccounts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
   }, [filteredAccounts, activeClientIds, currentPage, ITEMS_PER_PAGE]);
+  const totalCount = filteredAccounts.length + filteredAppAccounts.length;
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const paginatedApps = filteredAppAccounts.slice(Math.max(0, startIndex - filteredAccounts.length), Math.max(0, startIndex + ITEMS_PER_PAGE - filteredAccounts.length));
+  useEffect(() => {
+    setCurrentPage(page => Math.min(page, Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))));
+  }, [totalCount, ITEMS_PER_PAGE]);
+  const appAccountContent = (account: typeof appAccounts[number]) => (
+    <GeminiAppAccountInfo account={account} onRemove={() => setAppDeleteId(account.id)} />
+  );
 
   const handleReorder = (orderedIds: string[]) => {
     const reorderedIds = new Set(orderedIds);
@@ -844,7 +878,7 @@ function Accounts() {
       />
 
       {/* 顶部工具栏:搜索、过滤和操作按钮 */}
-      <div className="flex-none flex items-center gap-2">
+      <div className="flex-none flex flex-wrap items-center gap-2">
         {/* 搜索框 - 响应式:大屏显示输入框,小屏显示图标 */}
         <div className="hidden lg:block flex-none w-40 relative transition-all focus-within:w-48">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -1027,13 +1061,19 @@ function Accounts() {
               {filterCounts.free}
             </span>
           </button>
+          <button type="button" aria-pressed={appOnly} onClick={() => { setFilter('gemini-app'); setSelectedIds(new Set()); }}
+            className={cn('flex items-center gap-1 px-2 md:px-3 py-1.5 rounded-lg text-[11px] font-semibold whitespace-nowrap transition-colors', appOnly ? 'bg-white dark:bg-base-100 text-blue-600 dark:text-blue-400 shadow-sm ring-1 ring-black/5' : 'text-gray-500 dark:text-gray-400 hover:bg-white/40')}>
+            Gemini App
+            <span className="rounded-md bg-blue-100 dark:bg-blue-500/20 px-1.5 py-0.5 text-[10px] text-blue-700 dark:text-blue-300">{searchedAppAccounts.length}</span>
+          </button>
         </div>
 
         <div className="flex-1 min-w-[8px]"></div>
 
         {/* 操作按钮组 */}
         <div className="flex items-center gap-1.5 shrink-0">
-          <AddAccountDialog onAdd={handleAddAccount} showText={false} />
+          <AddAccountDialog onAdd={handleAddAccount} showText={false} initialTab={appOnly ? 'gemini-app' : undefined} />
+          {!appOnly && <>
 
           {selectedIds.size > 0 && (
             <>
@@ -1153,16 +1193,35 @@ function Accounts() {
                 : t("common.export")}
             </span>
           </button>
+          </>}
         </div>
       </div>
 
       {/* 账号列表内容区域 */}
       <div className="flex-1 min-h-0 relative" ref={containerRef}>
-        {viewMode === "list" ? (
+        {appOnly && appLoadError ? (
+          <p role="alert" className="rounded-2xl bg-white dark:bg-base-100 p-5 text-sm text-red-600 dark:text-red-400">{t(`${appPrefix}.errors.request_failed`)}</p>
+        ) : appOnly && totalCount === 0 ? (
+          <p className="rounded-2xl bg-white dark:bg-base-100 p-5 text-sm text-gray-500 dark:text-gray-400">{t(searchQuery ? 'accounts.empty.title' : `${appPrefix}.empty`)}</p>
+        ) : viewMode === "list" ? (
           <div className="h-full bg-white dark:bg-base-100 rounded-2xl shadow-sm border border-gray-100 dark:border-base-200 flex flex-col overflow-hidden">
             <div className="flex-1 overflow-y-auto">
               <AccountTable
                 accounts={paginatedAccounts}
+                extraRows={paginatedApps.map(account => (
+                  <tr key={account.id}>
+                    <td colSpan={2} />
+                    <td className="px-2 py-3"><GeminiAppAccountInfo account={account} /></td>
+                    <td className="px-2 text-gray-400">—</td>
+                    <td className="px-2 text-gray-400">—</td>
+                    <td className="px-2 text-center sticky right-0 bg-white dark:bg-base-100">
+                      <button type="button" className="rounded-lg p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/25"
+                        onClick={() => setAppDeleteId(account.id)} title={t(`${appPrefix}.remove`)} aria-label={t(`${appPrefix}.remove`)}>
+                        <Trash2 className="w-4 h-4" aria-hidden="true" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
                 selectedIds={selectedIds}
                 refreshingIds={refreshingIds}
                 onToggleSelect={handleToggleSelect}
@@ -1194,6 +1253,7 @@ function Accounts() {
           <div className="h-full overflow-y-auto">
             <AccountGrid
               accounts={paginatedAccounts}
+              extraCards={paginatedApps.map(account => <article key={account.id} className="rounded-2xl border border-gray-100 dark:border-base-200 bg-white dark:bg-base-100 p-4 shadow-sm">{appAccountContent(account)}</article>)}
               selectedIds={selectedIds}
               refreshingIds={refreshingIds}
               onToggleSelect={handleToggleSelect}
@@ -1222,13 +1282,21 @@ function Accounts() {
       </div>
 
       {/* 极简分页 - 无边框浮动样式 */}
-      {filteredAccounts.length > 0 && (
+      {appDeleteId && <ModalDialog isOpen title={t(`${appPrefix}.remove`)} message={t(`${appPrefix}.confirm_remove`)}
+        confirmText={t(`${appPrefix}.remove`)} cancelText={t('common.cancel')} isDestructive isLoading={removingApp}
+        onCancel={() => setAppDeleteId(null)} onConfirm={async () => {
+          setRemovingApp(true);
+          try { await removeAppAccount(appDeleteId); setAppDeleteId(null); }
+          catch { showToast(t(`${appPrefix}.errors.request_failed`), 'error'); }
+          finally { setRemovingApp(false); }
+        }} />}
+      {totalCount > 0 && (
         <div className="flex-none">
           <Pagination
             currentPage={currentPage}
-            totalPages={Math.ceil(filteredAccounts.length / ITEMS_PER_PAGE)}
+            totalPages={Math.ceil(totalCount / ITEMS_PER_PAGE)}
             onPageChange={handlePageChange}
-            totalItems={filteredAccounts.length}
+            totalItems={totalCount}
             itemsPerPage={ITEMS_PER_PAGE}
             onPageSizeChange={(newSize) => {
               setLocalPageSize(newSize);

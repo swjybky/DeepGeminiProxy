@@ -6546,6 +6546,24 @@ impl TokenManager {
         }
     }
 
+    /// Read effort variants already loaded from account quota files, even before the
+    /// process-local official catalog has been refreshed. No disk reads on the request path.
+    pub(crate) fn available_effort_tiers(&self, base: &str) -> Vec<String> {
+        use crate::proxy::common::model_catalog::EFFORT_SUFFIXES;
+
+        EFFORT_SUFFIXES
+            .iter()
+            .copied()
+            .filter(|tier| {
+                let id = format!("{base}-{tier}");
+                self.tokens
+                    .iter()
+                    .any(|token| token.available_models.contains(&id))
+            })
+            .map(str::to_owned)
+            .collect()
+    }
+
     /// 获取当前所有可用账号中收集到的官方下发模型集合
     ///
     /// 用于对外模型列表（`/v1/models` 等）：**不包含** `model_quotas` 里的内部保护桶名，
@@ -7599,6 +7617,80 @@ mod tests {
         assert!(manager.get_preferred_account().await.is_none());
 
         let _ = std::fs::remove_dir_all(&tmp_root);
+    }
+
+    #[tokio::test]
+    async fn cold_start_catalog_and_routing_use_loaded_account_variants() {
+        use crate::proxy::common::{model_catalog, model_mapping};
+
+        let dir = tempfile::tempdir().unwrap();
+        let accounts_dir = dir.path().join("accounts");
+        std::fs::create_dir_all(&accounts_dir).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let account = serde_json::json!({
+            "id": "fixture",
+            "email": "fixture@example.test",
+            "token": {
+                "access_token": "test-only",
+                "refresh_token": "test-only",
+                "expires_in": 3600,
+                "expiry_timestamp": now + 3600
+            },
+            "quota": {"models": [
+                {"name": "gemini-4-hydrogen-low", "percentage": 88},
+                {"name": "gemini-4-hydrogen-high", "percentage": 88},
+                {"name": "gemini-4-hydrogen-tiered", "percentage": 88},
+                {"name": "gemini-4-hydrogen-tiered-xhigh", "percentage": 88},
+                {"name": "gemini-4-neon-xhigh", "percentage": 88},
+                {"name": "gpt-oss-120b-medium", "percentage": 88}
+            ]},
+            "created_at": now,
+            "last_used": now
+        });
+        std::fs::write(accounts_dir.join("fixture.json"), account.to_string()).unwrap();
+        let manager = TokenManager::new(dir.path().into());
+        assert_eq!(manager.load_accounts().await.unwrap(), 1);
+
+        let mapping = tokio::sync::RwLock::new(HashMap::new());
+        let ids = model_mapping::get_all_dynamic_models(&mapping, Some(&manager), false).await;
+        let aliases = mapping.read().await;
+        let groups = model_catalog::group_models(ids, &aliases);
+        assert_eq!(
+            model_catalog::discoverable_ids(groups, |_| true),
+            [
+                "gemini-4-hydrogen",
+                "gemini-4-hydrogen-tiered",
+                "gemini-4-neon",
+                "gpt-oss-120b"
+            ]
+        );
+        for (model, effort, expected) in [
+            ("gemini-4-hydrogen", None, "gemini-4-hydrogen-high"),
+            ("gemini-4-hydrogen", Some("low"), "gemini-4-hydrogen-low"),
+            (
+                "gemini-4-hydrogen-high",
+                Some("low"),
+                "gemini-4-hydrogen-high",
+            ),
+            ("gemini-4-hydrogen-tiered", None, "gemini-4-hydrogen-tiered"),
+            (
+                "gemini-4-hydrogen-tiered",
+                Some("x_high"),
+                "gemini-4-hydrogen-tiered-xhigh",
+            ),
+            ("gemini-4-neon", None, "gemini-4-neon-xhigh"),
+            ("gpt-oss-120b", None, "gpt-oss-120b-medium"),
+        ] {
+            assert_eq!(
+                model_mapping::resolve_model_route_with_effort_and_pool(
+                    model,
+                    &aliases,
+                    effort,
+                    Some(&manager)
+                ),
+                expected,
+            );
+        }
     }
 
     #[tokio::test]

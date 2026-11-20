@@ -24,6 +24,8 @@
 | --- | --- |
 | 网页请求失败但桌面成功，或 Tauri 无法调用命令 | [桌面/Web 请求差异](error/desktop-web-request.md) |
 | 401 / 403、代理密钥未被接受 | [代理鉴权](docs/proxy/auth.md) |
+| DeepWrite 接入后显示「密钥已配置」但解密失败 | [DeepWrite 密钥排查](error/deepwrite-key-decryption.md) |
 | `invalid_grant`、账号授权失效 | [invalid_grant](docs/proxy-invalid-grant.md) |
 | 503、无法区分本地代理错误和上游错误 | [503 排查](docs/test_503_issue.md) |
+| 冷启动仍显示同模型的多个思考档位 | [冷启动模型列表](error/model-catalog-cold-start.md) |
 | 暂存区有他人内容、测试报无关文件错误 | [混合工作区](error/mixed-worktree.md) |

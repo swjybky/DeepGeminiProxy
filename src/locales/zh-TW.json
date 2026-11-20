@@ -4,9 +4,6 @@
         "tag": "推薦",
         "desc": "客戶端直控模式與自訂 Token 檔位已下線：具備 thinkingLevel 的模型由模型檔位直接決定等級（low / medium / high），其餘模型沿用官方 thinkingBudget 預設值。客戶端傳入的思考檔位僅在無後綴（裸）模型上生效，用於選擇具體檔位模型。"
     },
-    "hub_update": {
-        "available": "antigravity hub latest: {{version}}，如果請求正常請忽略"
-    },
     "common": {
         "empty": "空",
         "loading": "載入中...",
@@ -254,6 +251,9 @@
         "edit_label": "編輯標籤",
         "activation": {
             "title": "用此帳號啟動 Antigravity",
+            "action": "切換帳號並啟動",
+            "select_client": "選擇要啟動的用戶端",
+            "confirm": "確認啟動",
             "current_account": "已登入此帳號",
             "signed_in_as": "目前登入 {{email}}",
             "no_account": "未偵測到登入帳號"
@@ -376,6 +376,35 @@
                 "oauth": "OAuth 授權",
                 "token": "Refresh Token",
                 "import": "從資料庫匯入"
+            },
+            "gemini_app": {
+                "description": "透過 Google 授權，將帳號加入獨立的 Gemini App 代理池。",
+                "web_hint": "請在執行閘道的電腦上開啟本頁面，以接收本機授權回呼。",
+                "start": "使用 Google 登入",
+                "open_google": "開啟 Google 登入頁面",
+                "waiting": "正在等待 Google 授權…",
+                "success": "帳號已加入 Gemini App 池，尚未驗證模型權限。",
+                "pool": "Gemini App 帳號",
+                "manage_pool": "管理 Gemini App 帳號",
+                "automatic_pool": "代理時自動從獨立帳號池選擇，不固定目前帳號。",
+                "no_ranking": "以下帳號已授權，暫不依配額排名；模型可用性以上游回應為準。",
+                "none_authorized": "目前沒有已授權的 Gemini App 帳號。",
+                "empty": "目前沒有 Gemini App 帳號。",
+                "authorized": "已授權",
+                "needs_login": "需要重新登入",
+                "remove": "移除",
+                "confirm_remove": "從 Gemini App 池移除此帳號？",
+                "errors": {
+                    "oauth_profile_required": "請先設定已獲 Gemini App 權限的 Google OAuth 用戶端和授權範圍，再重新啟動 DeepGeminiProxy。",
+                    "oauth_profile_invalid": "Gemini App OAuth 設定無效。",
+                    "oauth_login_pending": "已有 Gemini App 授權正在進行。",
+                    "copy_failed": "無法複製授權連結，請用瀏覽器開啟授權頁面。",
+                    "oauth_timeout": "Google 授權逾時，請重試。",
+                    "oauth_denied": "Google 授權遭拒。",
+                    "oauth_token_rejected": "Google 拒絕交換權杖，請檢查 OAuth 設定。",
+                    "oauth_refresh_token_missing": "Google 未簽發更新權杖，請檢查 OAuth 用戶端是否允許離線存取。",
+                    "request_failed": "Gemini App 操作失敗，請重試或檢查 OAuth 設定。"
+                }
             },
             "oauth": {
                 "recommend": "推薦方式",
@@ -887,6 +916,8 @@
                 "enable_all": "全部啟用",
                 "disable_all": "全部停用",
                 "all_enabled": "預設啟用全部模型，包括之後新增的模型。",
+                "grouping_hint": "同一模型的思考檔位合併顯示，呼叫時透過請求參數選擇。標有「−」的模型僅啟用了部分檔位，點擊可啟用整組。",
+                "loading": "正在擷取模型清單…",
                 "selected": "已啟用 {{count}} 個模型",
                 "unsaved": "點擊上方「儲存」套用模型選擇。",
                 "fetch_failed": "拉取模型清單失敗：{{error}}",
@@ -1553,7 +1584,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent 連線",
-                "deepwrite_hint": "請先完全退出 DeepWrite（⌘Q）。開啟後，Gemini 模型會出現在自訂模型的 DeepGemini 群組中。",
+                "deepwrite_hint": "無需退出 DeepWrite。開啟後，Gemini 模型會加入自訂模型的 DeepGemini 群組。",
                 "description": "開啟開關，自動設定閘道位址、金鑰和模型。",
                 "connection_changed": "連線設定已變更",
                 "key_required": "請先設定閘道 API 金鑰，再開啟 Agent 連線。",

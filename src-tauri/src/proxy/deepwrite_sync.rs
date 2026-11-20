@@ -63,7 +63,7 @@ mod macos {
     use std::{
         collections::{BTreeSet, HashSet},
         fs::{self, File, OpenOptions},
-        io::{ErrorKind, Write},
+        io::{ErrorKind, Read, Seek, SeekFrom, Write},
         os::unix::fs::OpenOptionsExt,
         path::{Path, PathBuf},
         process::Stdio,
@@ -72,8 +72,8 @@ mod macos {
     use zeroize::Zeroizing;
 
     const PROVIDER_ID: &str = "DeepGemini";
-    const KEYCHAIN_SERVICE: &str = "DeepWrite Safe Storage";
-    const KEYCHAIN_ACCOUNT: &str = "DeepWrite Key";
+    const ASAR_HEADER_LIMIT: u32 = 16 * 1024 * 1024;
+    const PACKAGE_JSON_LIMIT: u64 = 1024 * 1024;
     static SYNC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
     fn installed_app(home: &Path) -> Option<PathBuf> {
@@ -81,6 +81,76 @@ mod macos {
             .into_iter()
             .map(|directory| directory.join("DeepWrite.app"))
             .find(|app| app.join("Contents/MacOS/DeepWrite").is_file())
+    }
+
+    fn read_asar_package(mut archive: File) -> Option<Value> {
+        // ASAR starts with a little-endian Pickle containing the header size,
+        // then a Pickle containing the JSON file index. Offsets follow both.
+        let mut prefix = [0u8; 16];
+        archive.read_exact(&mut prefix).ok()?;
+        let field = |offset| u32::from_le_bytes(prefix[offset..offset + 4].try_into().unwrap());
+        let header_size = field(4);
+        let json_size = field(12);
+        if !(8..=ASAR_HEADER_LIMIT).contains(&header_size)
+            || field(0) != 4
+            || field(8) != header_size - 4
+            || json_size > header_size - 8
+            || header_size - 8 - json_size > 3
+            || header_size % 4 != 0
+        {
+            return None;
+        }
+        let mut header = vec![0; json_size as usize];
+        archive.read_exact(&mut header).ok()?;
+        let index: Value = serde_json::from_slice(&header).ok()?;
+        let entry = &index["files"]["package.json"];
+        let offset: u64 = entry["offset"].as_str()?.parse().ok()?;
+        let size = entry["size"].as_u64()?;
+        if size > PACKAGE_JSON_LIMIT {
+            return None;
+        }
+        let start = (8 + u64::from(header_size)).checked_add(offset)?;
+        let mut contents = vec![0; size as usize];
+        archive.seek(SeekFrom::Start(start)).ok()?;
+        archive.read_exact(&mut contents).ok()?;
+        serde_json::from_slice(&contents).ok()
+    }
+
+    fn electron_storage_name(app: &Path) -> Result<String, String> {
+        let resources = app.join("Contents/Resources");
+        let package = match File::open(resources.join("app.asar")) {
+            Ok(archive) => read_asar_package(archive),
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                File::open(resources.join("app/package.json"))
+                    .ok()
+                    .and_then(|file| {
+                        let mut bytes = Vec::new();
+                        file.take(PACKAGE_JSON_LIMIT + 1)
+                            .read_to_end(&mut bytes)
+                            .ok()?;
+                        if bytes.len() as u64 > PACKAGE_JSON_LIMIT {
+                            return None;
+                        }
+                        serde_json::from_slice(&bytes).ok()
+                    })
+            }
+            Err(_) => None,
+        };
+        // Electron initializes Safe Storage with its package name (productName
+        // first), not the macOS bundle display name. A stale bundle-name item
+        // can exist in the keychain and silently produce unreadable ciphertext.
+        package
+            .and_then(|package| {
+                package
+                    .get("productName")
+                    .filter(|name| !name.is_null())
+                    .or_else(|| package.get("name"))?
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty() && !name.chars().any(char::is_control))
+                    .map(str::to_owned)
+            })
+            .ok_or_else(|| "无法识别 DeepWrite 的安全存储名称，请检查 DeepWrite 安装。".into())
     }
 
     fn read_json(path: &Path) -> Result<Option<Value>, String> {
@@ -112,14 +182,14 @@ mod macos {
         Ok(profile.join("config/models.json"))
     }
 
-    fn installed_profile() -> Result<PathBuf, String> {
+    fn installed_profile() -> Result<(PathBuf, PathBuf), String> {
         let home = dirs::home_dir().ok_or("无法定位当前用户的目录。")?;
-        installed_app(&home).ok_or("未检测到 DeepWrite 桌面版。")?;
+        let app = installed_app(&home).ok_or("未检测到 DeepWrite 桌面版。")?;
         let path = model_path(&home)?;
         if !path.is_file() {
-            return Err("请先打开 DeepWrite 初始化模型配置，再完全退出 DeepWrite（⌘Q）。".into());
+            return Err("请先在 DeepWrite 中初始化模型配置。".into());
         }
-        Ok(path)
+        Ok((app, path))
     }
 
     fn load_models(path: &Path) -> Result<Value, String> {
@@ -133,22 +203,6 @@ mod macos {
             );
         }
         Ok(value)
-    }
-
-    fn ensure_closed() -> Result<(), String> {
-        let mut system = sysinfo::System::new();
-        system.refresh_processes(sysinfo::ProcessesToUpdate::All);
-        if system.processes().values().any(|process| {
-            process.name() == "DeepWrite"
-                || process.exe().is_some_and(|path| {
-                    let path = path.to_string_lossy().to_ascii_lowercase();
-                    path.contains("/deepwrite.app/")
-                        || (path.contains("/deepwrite/") && path.contains("/electron.app/"))
-                })
-        }) {
-            return Err("请完全退出 DeepWrite（⌘Q），再切换接入开关。".into());
-        }
-        Ok(())
     }
 
     struct ConfigLock(PathBuf);
@@ -168,7 +222,10 @@ mod macos {
             .create_new(true)
             .mode(0o600)
             .open(&path)
-            .map_err(|_| "DeepWrite 配置正被占用，请打开并退出 DeepWrite 后重试。")?;
+            .map_err(|err| match err.kind() {
+                ErrorKind::AlreadyExists => "DeepWrite 模型配置正被占用，请稍后重试。".into(),
+                _ => format!("无法获取 DeepWrite 配置锁：{err}"),
+            })?;
         let lock = ConfigLock(path);
         let acquired_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
@@ -277,6 +334,18 @@ mod macos {
         Ok(())
     }
 
+    fn write_integration(
+        path: &Path,
+        models: &BTreeSet<String>,
+        base_url: &str,
+        secret: &str,
+    ) -> Result<(), String> {
+        let _guard = acquire_config_lock(path)?;
+        let mut config = load_models(path)?;
+        update_models(&mut config, models, base_url, secret)?;
+        save_models(path, &config)
+    }
+
     pub(super) fn status(proxy_url: &str) -> Result<DeepWriteStatus, String> {
         let Some(home) = dirs::home_dir() else {
             return Ok(DeepWriteStatus::default());
@@ -342,16 +411,18 @@ mod macos {
         })
     }
 
-    async fn encrypt_gateway_key(key: &str) -> Result<String, String> {
+    async fn encrypt_gateway_key(key: &str, storage_name: &str) -> Result<String, String> {
+        let service = format!("{storage_name} Safe Storage");
+        let account = format!("{storage_name} Key");
         let result = tokio::time::timeout(
             Duration::from_secs(60),
             tokio::process::Command::new("/usr/bin/security")
                 .args([
                     "find-generic-password",
                     "-s",
-                    KEYCHAIN_SERVICE,
+                    &service,
                     "-a",
-                    KEYCHAIN_ACCOUNT,
+                    &account,
                     "-w",
                 ])
                 .stderr(Stdio::null())
@@ -400,9 +471,9 @@ mod macos {
         let _sync = SYNC_LOCK
             .try_lock()
             .map_err(|_| "DeepWrite 接入设置正在更新。")?;
-        let path = installed_profile()?;
-        ensure_closed()?;
+        let (app, path) = installed_profile()?;
         load_models(&path)?;
+        let storage_name = electron_storage_name(&app)?;
         if key.trim().is_empty() {
             return Err("请先为 Antigravity 网关配置 API Key。".into());
         }
@@ -434,29 +505,68 @@ mod macos {
         if models.is_empty() {
             return Err("网关没有可用的 Gemini 对话模型。".into());
         }
-        let secret = encrypt_gateway_key(key).await?;
-        ensure_closed()?;
-        let _guard = acquire_config_lock(&path)?;
-        let mut config = load_models(&path)?;
-        update_models(&mut config, &models, &base_url, &secret)?;
-        save_models(&path, &config)
+        let secret = encrypt_gateway_key(key, &storage_name).await?;
+        write_integration(&path, &models, &base_url, &secret)
     }
 
     pub(super) fn disconnect() -> Result<(), String> {
         let _sync = SYNC_LOCK
             .try_lock()
             .map_err(|_| "DeepWrite 接入设置正在更新。")?;
-        let path = installed_profile()?;
-        ensure_closed()?;
-        let _guard = acquire_config_lock(&path)?;
-        let mut config = load_models(&path)?;
-        update_models(&mut config, &BTreeSet::new(), "", "")?;
-        save_models(&path, &config)
+        let (_, path) = installed_profile()?;
+        write_integration(&path, &BTreeSet::new(), "", "")
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn test_asar(package: &Value) -> Vec<u8> {
+            let contents = serde_json::to_vec(package).unwrap();
+            let header = serde_json::to_vec(&json!({
+                "files": { "package.json": { "offset": "3", "size": contents.len() } }
+            }))
+            .unwrap();
+            let padded = header.len().next_multiple_of(4);
+            let mut archive = Vec::new();
+            for size in [4, 8 + padded, 4 + padded, header.len()] {
+                archive.extend_from_slice(&(size as u32).to_le_bytes());
+            }
+            archive.extend_from_slice(&header);
+            archive.resize(16 + padded, 0);
+            archive.extend_from_slice(b"xxx");
+            archive.extend_from_slice(&contents);
+            archive
+        }
+
+        #[test]
+        fn resolves_safe_storage_name_from_packaged_electron_manifest() {
+            let fixture = tempfile::tempdir().unwrap();
+            let app = fixture.path().join("DeepWrite.app");
+            let resources = app.join("Contents/Resources");
+            fs::create_dir_all(resources.join("app")).unwrap();
+            fs::write(
+                resources.join("app/package.json"),
+                br#"{"name":"fallback"}"#,
+            )
+            .unwrap();
+            let archive = resources.join("app.asar");
+            let package = json!({"name": "@deepwrite/desktop"});
+            fs::write(&archive, test_asar(&package)).unwrap();
+            assert_eq!(electron_storage_name(&app).unwrap(), "@deepwrite/desktop");
+
+            let package = json!({"name": "@deepwrite/desktop", "productName": " DeepWrite "});
+            fs::write(&archive, test_asar(&package)).unwrap();
+            assert_eq!(electron_storage_name(&app).unwrap(), "DeepWrite");
+
+            let mut malformed = test_asar(&package);
+            malformed[4..8].copy_from_slice(&u32::MAX.to_le_bytes());
+            fs::write(&archive, malformed).unwrap();
+            assert!(electron_storage_name(&app).is_err());
+
+            fs::remove_file(&archive).unwrap();
+            assert_eq!(electron_storage_name(&app).unwrap(), "fallback");
+        }
 
         #[test]
         fn encrypts_key_in_electron_safe_storage_format() {
@@ -479,28 +589,38 @@ mod macos {
             let existing = json!({ "version": 3, "defaultModelId": "manual", "models": [
                 { "id": "manual", "provider": "DeepGemini", "modelId": "gemini-manual" }
             ], "encryptedApiKeys": { "manual": "test-ciphertext" }, "extra": [1, 2] });
-            let mut config = existing.clone();
+            let profile = tempfile::tempdir().unwrap();
+            let path = profile.path().join("models.json");
+            save_models(&path, &existing).unwrap();
+
             let models = BTreeSet::from(["gemini-test".to_string()]);
-            update_models(
-                &mut config,
-                &models,
-                "http://example.test/v1",
-                "test-ciphertext",
-            )
-            .unwrap();
-            assert_eq!(config["models"][1]["modelId"], "gemini-test");
-            assert_eq!(config["defaultModelId"], "manual");
-            let updated = config.clone();
-            update_models(
-                &mut config,
-                &models,
-                "http://example.test/v1",
-                "test-ciphertext",
-            )
-            .unwrap();
-            assert_eq!(updated, config);
-            update_models(&mut config, &BTreeSet::new(), "", "").unwrap();
-            assert_eq!(config, existing);
+            let connect =
+                |secret| write_integration(&path, &models, "http://example.test/v1", secret);
+            let disconnect = || write_integration(&path, &BTreeSet::new(), "", "");
+
+            connect("stale-managed-ciphertext").unwrap();
+            connect("new-managed-ciphertext").unwrap();
+            let updated = load_models(&path).unwrap();
+            assert_eq!(updated["models"][1]["modelId"], "gemini-test");
+            assert_eq!(updated["defaultModelId"], "manual");
+            assert_eq!(updated["encryptedApiKeys"]["manual"], "test-ciphertext");
+            assert_eq!(
+                updated["encryptedApiKeys"][managed_id("gemini-test")],
+                "new-managed-ciphertext"
+            );
+            connect("new-managed-ciphertext").unwrap();
+            assert_eq!(load_models(&path).unwrap(), updated);
+
+            let lock = acquire_config_lock(&path).unwrap();
+            assert_eq!(
+                disconnect().unwrap_err(),
+                "DeepWrite 模型配置正被占用，请稍后重试。"
+            );
+            assert_eq!(load_models(&path).unwrap(), updated);
+            drop(lock);
+
+            disconnect().unwrap();
+            assert_eq!(load_models(&path).unwrap(), existing);
         }
     }
 }

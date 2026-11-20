@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tauri::{Emitter, Manager};
 use tauri_plugin_opener::OpenerExt;
 
+pub(crate) mod gemini_app;
 // 导出 proxy 命令
 pub mod proxy;
 // 导出 autostart 命令

@@ -415,7 +415,7 @@ mod tests {
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-3.8-flash", &empty_mapping, None),
-            "gemini-3.8-flash-tiered"
+            "gemini-3.8-flash-high"
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-3.8-flash", &empty_mapping, Some("low")),
@@ -433,7 +433,7 @@ mod tests {
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-4-argon", &empty_mapping, None),
-            "gemini-4-argon-medium"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             resolve_model_route_with_effort("claude-opus-5-5", &empty_mapping, Some("high")),

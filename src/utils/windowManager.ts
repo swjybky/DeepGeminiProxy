@@ -1,8 +1,12 @@
-import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+import { currentMonitor, getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
 import { isTauri } from './env';
 
 export const MINI_MODE_WIDTH = 360;
 export const MINI_MODE_HEIGHT = 360;
+
+// Match the main window defaults in tauri.conf.json (logical pixels).
+const MAIN_WINDOW_SIZE = new LogicalSize(1200, 800);
+const MIN_STARTUP_SIZE = new LogicalSize(900, 600);
 
 /**
  * Enter mini view mode
@@ -44,7 +48,7 @@ export const exitMiniMode = async () => {
     try {
         const win = getCurrentWindow();
         // Restore to a reasonable default size
-        await win.setSize(new LogicalSize(1200, 800));
+        await win.setSize(MAIN_WINDOW_SIZE);
         await win.setAlwaysOnTop(false);
         await win.center();
         // Restore window decorations (title bar)
@@ -56,24 +60,31 @@ export const exitMiniMode = async () => {
     }
 };
 
-/**
- * Ensure window is in valid full view state (Self-healing)
- * Used on app startup to recover from improper shutdown in mini mode
- */
+/** Repair an undersized saved main window once per launch, not during manual resizing. */
 export const ensureFullViewState = async () => {
     if (!isTauri()) return;
     try {
         const win = getCurrentWindow();
-        const size = await win.outerSize();
-        // If window is suspiciously narrow (likely leftover from Mini View), restore default size
-        if (size.width < 500) {
-            await win.setSize(new LogicalSize(1200, 800));
-            await win.center();
-        }
-        // Always enforce standard window properties for Full View
         await win.setDecorations(true);
         await win.setResizable(true);
         await win.setAlwaysOnTop(false);
+
+        if (await win.isFullscreen() || await win.isMaximized()) return;
+
+        const [physicalSize, scaleFactor] = await Promise.all([win.innerSize(), win.scaleFactor()]);
+        // Tauri restores physical pixels; on Retina, 1024×700 can be just 512×350 logical pixels.
+        const size = physicalSize.toLogical(scaleFactor);
+        if (size.width >= MIN_STARTUP_SIZE.width && size.height >= MIN_STARTUP_SIZE.height) return;
+
+        const monitor = await currentMonitor();
+        const workArea = monitor?.workArea.size.toLogical(monitor.scaleFactor);
+        const width = Math.min(MAIN_WINDOW_SIZE.width, workArea?.width || MAIN_WINDOW_SIZE.width);
+        const height = Math.min(MAIN_WINDOW_SIZE.height, workArea?.height || MAIN_WINDOW_SIZE.height);
+        if (size.width < Math.min(MIN_STARTUP_SIZE.width, width) ||
+            size.height < Math.min(MIN_STARTUP_SIZE.height, height)) {
+            await win.setSize(new LogicalSize(width, height));
+            await win.center();
+        }
     } catch (error) {
         console.error('Failed to ensure full view state:', error);
     }

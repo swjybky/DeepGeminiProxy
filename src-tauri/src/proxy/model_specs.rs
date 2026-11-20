@@ -428,22 +428,25 @@ pub fn pick_optimal_default_tier(available_tiers: &[String]) -> Option<String> {
 }
 
 /// 纯通用裸模型分档路由器 (Dynamic Tier Router)
-/// 彻底消除品牌特判分支，完全由上游 OfficialModelCatalog 的可用档位数组与权重梯队驱动
 pub struct DynamicTierRouter;
 
 impl DynamicTierRouter {
     pub fn resolve(model: &str, client_effort: Option<&str>) -> Option<String> {
+        Self::resolve_with_pool(model, client_effort, None)
+    }
+
+    pub(crate) fn resolve_with_pool(
+        model: &str,
+        client_effort: Option<&str>,
+        token_manager: Option<&crate::proxy::token_manager::TokenManager>,
+    ) -> Option<String> {
         let clean = model.trim().to_lowercase();
 
-        // 1. 若当前模型名本身已经带有档位后缀（如 -high, -low, -tiered 等），说明已经是指向具名变体，不在此解析
-        if clean.ends_with("-high")
-            || clean.ends_with("-medium")
-            || clean.ends_with("-low")
-            || clean.ends_with("-extra-low")
-            || clean.ends_with("-tiered")
-            || clean.ends_with("-lite")
-            || clean.ends_with("-agent")
-        {
+        use crate::proxy::common::model_catalog::effort_base;
+
+        // Concrete effort IDs always win over the client's requested effort.
+        // A -tiered product can have its own effort IDs, but defaults to itself.
+        if effort_base(&clean).is_some() || clean.ends_with("-lite") || clean.ends_with("-agent") {
             return None;
         }
 
@@ -461,11 +464,27 @@ impl DynamicTierRouter {
             return None;
         }
 
-        // 2. 动态收集属于该 base 模型的所有可用档位后缀
-        let available_tiers = crate::models::OfficialModelCatalog::collect_tiers_for_base(&base);
+        // Prefer variants advertised by the pool to stale or not-yet-synced catalog data.
+        let mut tiers =
+            token_manager.map_or_else(Vec::new, |pool| pool.available_effort_tiers(&base));
+        if tiers.is_empty() {
+            tiers = crate::models::OfficialModelCatalog::collect_tiers_for_base(&base);
+        }
+        Self::resolve_from_tiers(&base, client_effort, tiers)
+    }
 
+    fn resolve_from_tiers(
+        base: &str,
+        client_effort: Option<&str>,
+        mut available_tiers: Vec<String>,
+    ) -> Option<String> {
+        use crate::proxy::common::model_catalog::EFFORT_SUFFIXES;
+
+        let tiered = base.ends_with("-tiered");
+        let has_legacy_tiered_route = !tiered && available_tiers.iter().any(|t| t == "tiered");
+        available_tiers.retain(|t| EFFORT_SUFFIXES.contains(&t.as_str()));
         if available_tiers.is_empty() {
-            return None;
+            return has_legacy_tiered_route.then(|| format!("{base}-tiered"));
         }
 
         // 2.5 显式关闭思考：仅裸模型能走到这里（具名档位已在步骤 1 返回）。
@@ -490,10 +509,13 @@ impl DynamicTierRouter {
 
             if is_explicit_tier {
                 // ① 原始值直接命中（如 extra-low / xhigh 若官方真存在）
-                if let Some(matched) = available_tiers
-                    .iter()
-                    .find(|t| t.eq_ignore_ascii_case(&raw))
-                {
+                if let Some(matched) = available_tiers.iter().find(|t| {
+                    t.eq_ignore_ascii_case(&raw)
+                        || matches!(
+                            (raw.as_str(), t.as_str()),
+                            ("x-high", "xhigh") | ("xhigh", "x-high")
+                        )
+                }) {
                     return Some(format!("{}-{}", base, matched));
                 }
                 // ② 语义等价映射后再命中（如 xhigh/max → high、minimal → low）
@@ -510,8 +532,10 @@ impl DynamicTierRouter {
             }
         }
 
-        // 4. 未指定 / default / 非官方实际档位：按统一默认档位决策
-        // tiered → medium → 「high 下的一个等级」→ 首个真实档位
+        // Keep the distinct -tiered product on its own default unless an effort matched.
+        if tiered {
+            return None;
+        }
         let default_tier = match pick_optimal_default_tier(&available_tiers) {
             Some(t) => t,
             None => return None,
@@ -666,7 +690,28 @@ mod tests {
     }
 
     #[test]
-    fn pick_default_tier_prefers_above_low_without_medium() {
+    fn nested_tiered_model_routes_only_to_its_own_effort_variants() {
+        let route = |effort| {
+            DynamicTierRouter::resolve_from_tiers(
+                "gemini-4-hydrogen-tiered",
+                effort,
+                ["high", "low"].map(str::to_owned).to_vec(),
+            )
+        };
+        assert_eq!(
+            route(Some("HIGH")).as_deref(),
+            Some("gemini-4-hydrogen-tiered-high")
+        );
+        assert_eq!(
+            route(Some("low")).as_deref(),
+            Some("gemini-4-hydrogen-tiered-low")
+        );
+        assert_eq!(route(None), None);
+        assert_eq!(route(Some("medium")), None);
+    }
+
+    #[test]
+    fn pick_default_tier_prefers_high_when_available() {
         let tiers = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
         // Pro 官方只有 low/high：默认必须回到 high，与 variant 的 Medium→Pro high 契约一致
         assert_eq!(
@@ -677,14 +722,13 @@ mod tests {
             pick_optimal_default_tier(&tiers(&["extra-low", "low", "high"])),
             Some("high".to_string())
         );
-        // 有 medium / tiered 时仍按优先级
         assert_eq!(
             pick_optimal_default_tier(&tiers(&["low", "medium", "high"])),
-            Some("medium".to_string())
+            Some("high".to_string())
         );
         assert_eq!(
-            pick_optimal_default_tier(&tiers(&["tiered", "high"])),
-            Some("tiered".to_string())
+            pick_optimal_default_tier(&tiers(&["low", "medium"])),
+            Some("medium".to_string())
         );
         assert_eq!(
             pick_optimal_default_tier(&tiers(&["low"])),

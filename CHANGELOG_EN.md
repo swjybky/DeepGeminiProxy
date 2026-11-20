@@ -3,6 +3,12 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.1 (2026-11-19)**:
+        -   Added a separate Gemini App account pool and model routing. Chat Completions and Responses can connect through a local App2API gateway; built-in sign-in requires an authorized OAuth configuration.
+        -   Fixed missing Antigravity model tiers on cold start and grouped the allowlist by model family. When no tier is requested, routing prefers High if available.
+        -   Fixed API key decryption for DeepWrite integration on macOS. Affected users can turn the integration off and back on after updating to rewrite the key.
+        -   Improved account filters and dashboard views, and restored undersized main windows on startup.
+
     *   **v1.0.0 (First independent DeepGeminiProxy release)**:
         -   DeepGeminiProxy starts its own version series at `1.0.0` and checks its own GitHub Releases for updates. Earlier entries are retained as upstream history.
         -   The new Agent Tools page brings client synchronization together, including DeepWrite integration on macOS.

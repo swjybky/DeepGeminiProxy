@@ -4,6 +4,7 @@ import AccountCard from './AccountCard';
 
 interface AccountGridProps {
     accounts: Account[];
+    extraCards?: React.ReactNode[];
     selectedIds: Set<string>;
     refreshingIds: Set<string>;
     onToggleSelect: (id: string) => void;
@@ -24,9 +25,9 @@ interface AccountGridProps {
 }
 
 
-function AccountGrid({ accounts, selectedIds, refreshingIds, onToggleSelect, currentAccountId, activeClients, switchingAccountId, onSwitch, onActivate, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountGridProps) {
+function AccountGrid({ accounts, extraCards = [], selectedIds, refreshingIds, onToggleSelect, currentAccountId, activeClients, switchingAccountId, onSwitch, onActivate, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountGridProps) {
     const { t } = useTranslation();
-    if (accounts.length === 0) {
+    if (accounts.length === 0 && extraCards.length === 0) {
         return (
             <div className="bg-white dark:bg-base-100 rounded-2xl p-12 shadow-sm border border-gray-100 dark:border-base-200 text-center">
                 <p className="text-gray-400 mb-2">{t('accounts.empty.title')}</p>
@@ -60,6 +61,7 @@ function AccountGrid({ accounts, selectedIds, refreshingIds, onToggleSelect, cur
                     onViewError={() => onViewError(account.id)}
                 />
             ))}
+            {extraCards}
         </div>
     );
 }

@@ -69,6 +69,7 @@ import { getLiveLimitForModel } from '../../utils/liveLimit';
 
 interface AccountTableProps {
     accounts: Account[];
+    extraRows?: React.ReactNode[];
     selectedIds: Set<string>;
     refreshingIds: Set<string>;
     onToggleSelect: (id: string) => void;
@@ -623,7 +624,6 @@ function AccountRowContent({
                 !isCurrent && "group-hover:bg-gray-50 dark:group-hover:bg-base-200"
             )}>
                 <div className="flex flex-wrap items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity max-w-[220px] mx-auto">
-                    {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
                     <button
                         className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
@@ -718,13 +718,16 @@ function AccountRowContent({
                             <ToggleLeft className="w-3.5 h-3.5" />
                         )}
                     </button>
-                    <button
-                        className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        title={t('common.delete')}
-                    >
-                        <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                        {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
+                        <button
+                            className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                            title={t('common.delete')}
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
                 </div>
             </td>
         </>
@@ -741,6 +744,7 @@ function AccountRowContent({
  */
 function AccountTable({
     accounts,
+    extraRows = [],
     selectedIds,
     refreshingIds,
     onToggleSelect,
@@ -853,7 +857,7 @@ function AccountTable({
         }
     };
 
-    if (accounts.length === 0) {
+    if (accounts.length === 0 && extraRows.length === 0) {
         return (
             <div className="bg-white dark:bg-base-100 rounded-2xl p-12 shadow-sm border border-gray-100 dark:border-base-200 text-center">
                 <p className="text-gray-400 mb-2">{t('accounts.empty.title')}</p>
@@ -881,6 +885,7 @@ function AccountTable({
                                     type="checkbox"
                                     className="checkbox checkbox-sm rounded border-2 border-gray-400 dark:border-gray-500 checked:border-blue-600 checked:bg-blue-600 [--chkbg:theme(colors.blue.600)] [--chkfg:white]"
                                     checked={accounts.length > 0 && selectedIds.size === accounts.length}
+                                    disabled={accounts.length === 0}
                                     onChange={onToggleAll}
                                 />
                             </th>
@@ -951,6 +956,7 @@ function AccountTable({
                                     isDragDisabled={isSortingActive}
                                 />
                             ))}
+                            {extraRows}
                         </tbody>
                     </SortableContext>
                 </table >

@@ -350,7 +350,6 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                     </div>
                 )}
                 <div className="flex flex-wrap items-center justify-center gap-1 w-full">
-                    {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
                     <button
                         className="p-1.5 text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
@@ -447,13 +446,16 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                             <ToggleLeft className="w-3.5 h-3.5" />
                         )}
                     </button>
-                    <button
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
-                        onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                        title={t('common.delete')}
-                    >
-                        <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="inline-flex items-center gap-1">
+                        {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
+                        <button
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-all"
+                            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                            title={t('common.delete')}
+                        >
+                            <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                    </div>
                 </div>
             </div>
         </motion.div>

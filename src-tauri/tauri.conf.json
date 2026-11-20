@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "DeepGeminiProxy",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "identifier": "com.lbjlaq.antigravity-tools",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -16,8 +16,10 @@
       {
         "label": "main",
         "title": "DeepGeminiProxy",
-        "width": 1024,
-        "height": 700,
+        "width": 1200,
+        "height": 800,
+        "center": true,
+        "preventOverflow": true,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "transparent": false,

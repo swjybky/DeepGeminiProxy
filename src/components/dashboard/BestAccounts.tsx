@@ -1,8 +1,9 @@
 import { useState, useMemo } from 'react';
-import { TrendingUp, ArrowRightLeft, Zap, Laptop, Code2, Terminal } from 'lucide-react';
+import { TrendingUp, ArrowRightLeft, Zap, Laptop, Code2, Terminal, Smartphone } from 'lucide-react';
 import { Account, QuotaGroup, ActiveClientsStatus, getAccountTier } from '../../types/account';
 import { findQuotaModel } from '../../config/modelConfig';
 import { useTranslation } from 'react-i18next';
+import { GeminiAppDashboardPool } from './GeminiAppDashboardPool';
 
 interface BestAccountsProps {
     accounts: Account[];
@@ -11,7 +12,7 @@ interface BestAccountsProps {
     onSwitch?: (accountId: string, targetIde?: string) => void;
 }
 
-type TargetIdeType = 'classic' | 'ide' | 'agy';
+type TargetIdeType = 'classic' | 'ide' | 'agy' | 'app';
 
 /** 从 quota_groups 中提取 5h 或 Weekly 桶百分比 (0-100) */
 function getBucketPercentage(
@@ -106,6 +107,12 @@ function BestAccounts({ accounts, currentAccountId, activeClients, onSwitch }: B
             label: t('accounts.client_cli', 'CLI'),
             icon: Terminal,
             activeBg: 'bg-emerald-600 text-white shadow-xs',
+        },
+        {
+            key: 'app' as TargetIdeType,
+            label: 'App',
+            icon: Smartphone,
+            activeBg: 'bg-violet-600 text-white shadow-xs',
         },
     ];
 
@@ -209,6 +216,7 @@ function BestAccounts({ accounts, currentAccountId, activeClients, onSwitch }: B
                             <button
                                 key={target.key}
                                 onClick={() => setTargetIde(target.key)}
+                                aria-pressed={isSelected}
                                 className={`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                                     isSelected
                                         ? target.activeBg
@@ -223,6 +231,7 @@ function BestAccounts({ accounts, currentAccountId, activeClients, onSwitch }: B
                 </div>
             </div>
 
+            {targetIde === 'app' ? <GeminiAppDashboardPool recommendations /> : <>
             <div className="space-y-2 flex-1">
                 {/* Gemini 最佳 */}
                 {bestGeminiRender && (
@@ -322,6 +331,7 @@ function BestAccounts({ accounts, currentAccountId, activeClients, onSwitch }: B
                     </button>
                 </div>
             )}
+            </>}
         </div>
     );
 }

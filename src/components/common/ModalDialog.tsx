@@ -16,6 +16,7 @@ interface ModalDialogProps {
     cancelText?: string;
     isDestructive?: boolean;
     isLoading?: boolean;
+    isConfirmDisabled?: boolean;
 }
 
 export default function ModalDialog({
@@ -29,7 +30,8 @@ export default function ModalDialog({
     confirmText,
     cancelText,
     isDestructive = false,
-    isLoading = false
+    isLoading = false,
+    isConfirmDisabled = false
 }: ModalDialogProps) {
     const { t } = useTranslation();
     const finalConfirmText = confirmText || t('common.confirm');
@@ -94,7 +96,7 @@ export default function ModalDialog({
                             </button>
                         )}
                         <button
-                            disabled={isLoading}
+                            disabled={isLoading || isConfirmDisabled}
                             className={`flex-1 px-4 py-2.5 text-white font-medium rounded-xl shadow-md transition-all focus:outline-none focus:ring-2 focus:ring-offset-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${isDestructive && type === 'confirm'
                                 ? 'bg-red-500 hover:bg-red-600 focus:ring-red-500 shadow-red-100'
                                 : 'bg-blue-500 hover:bg-blue-600 focus:ring-blue-500 shadow-blue-100'

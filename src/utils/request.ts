@@ -149,6 +149,12 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   'get_effective_first_byte_timeouts': { url: '/api/system/timeouts/effective-first-byte', method: 'GET' },
 
   // OAuth
+  'gemini_app_accounts': { url: '/api/accounts/gemini-app', method: 'GET' },
+  'gemini_app_gateway_status': { url: '/api/accounts/gemini-app/gateway-status', method: 'GET' },
+  'gemini_app_login_start': { url: '/api/accounts/gemini-app/login', method: 'POST' },
+  'gemini_app_login_status': { url: '/api/accounts/gemini-app/login/:id', method: 'GET' },
+  'gemini_app_login_cancel': { url: '/api/accounts/gemini-app/login/:id', method: 'DELETE' },
+  'gemini_app_account_remove': { url: '/api/accounts/gemini-app/:id', method: 'DELETE' },
   'prepare_oauth_url': { url: '/api/auth/url', method: 'GET' },
   'start_oauth_login': { url: '/api/accounts/oauth/start', method: 'POST' },
   'complete_oauth_login': { url: '/api/accounts/oauth/complete', method: 'POST' },

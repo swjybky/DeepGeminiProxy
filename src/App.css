@@ -2,19 +2,48 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Override dark background utilities so enabled switches remain distinct. */
-.dark input.toggle[type="checkbox"]:checked {
-  background-color: var(--app-toggle-active, #3b82f6);
-  border-color: var(--app-toggle-active, #3b82f6);
+/* Let the thumb settle into the filled track on enable; release it faster on disable. */
+input.toggle[type="checkbox"] {
+  --app-toggle-active: #16a34a;
+  --app-toggle-slide: 150ms ease-out;
+  --app-toggle-fill: 110ms ease-out;
+  transition: grid-template-columns var(--app-toggle-slide),
+    background-color var(--app-toggle-fill), border-color var(--app-toggle-fill);
 }
 
-.dark input.toggle[type="checkbox"]:checked::before {
+input.toggle[type="checkbox"]::before {
+  transition: background-color var(--app-toggle-fill), scale 100ms ease-out;
+}
+
+input.toggle[type="checkbox"]:not(:checked):not(:disabled):active::before {
+  scale: 0.9;
+}
+
+input.toggle[type="checkbox"]:checked {
+  --app-toggle-slide: 240ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  --app-toggle-fill: 150ms ease-out;
+  background-color: var(--app-toggle-active);
+  border-color: var(--app-toggle-active);
+}
+
+input.toggle[type="checkbox"]:checked::before {
   background-color: #ffffff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 22%);
 }
 
-.dark input.toggle.toggle-success { --app-toggle-active: #16a34a; }
-.dark input.toggle.toggle-warning { --app-toggle-active: #d97706; }
-.dark input.toggle.toggle-error { --app-toggle-active: #dc2626; }
+input.toggle.toggle-warning { --app-toggle-active: #d97706; }
+input.toggle.toggle-error { --app-toggle-active: #dc2626; }
+
+@media (prefers-reduced-motion: reduce) {
+  input.toggle[type="checkbox"],
+  input.toggle[type="checkbox"]::before {
+    transition: none;
+  }
+
+  input.toggle[type="checkbox"]:not(:checked):not(:disabled):active::before {
+    scale: none;
+  }
+}
 
 /* 禁止过度滚动和橡皮筋效果 */
 html,

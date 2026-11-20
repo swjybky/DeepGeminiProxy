@@ -9,19 +9,21 @@ import { request as invoke } from '../../utils/request';
 import { isTauri } from '../../utils/env';
 import { copyToClipboard } from '../../utils/clipboard';
 import * as accountService from '../../services/accountService';
+import GeminiAppTab from './GeminiAppTab';
 
 interface AddAccountDialogProps {
     onAdd: (email: string, refreshToken: string) => Promise<void>;
     showText?: boolean;
+    initialTab?: 'gemini-app';
 }
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
-function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
+function AddAccountDialog({ onAdd, showText = true, initialTab }: AddAccountDialogProps) {
     const { t } = useTranslation();
     const fetchAccounts = useAccountStore(state => state.fetchAccounts);
     const [isOpen, setIsOpen] = useState(false);
-    const [activeTab, setActiveTab] = useState<'oauth' | 'token' | 'import'>(isTauri() ? 'oauth' : 'token');
+    const [activeTab, setActiveTab] = useState<'oauth' | 'token' | 'import' | 'gemini-app'>(isTauri() ? 'oauth' : 'token');
     const [accountType, setAccountType] = useState<'personal' | 'enterprise'>('personal');
     const [refreshToken, setRefreshToken] = useState('');
     const [oauthUrl, setOauthUrl] = useState('');
@@ -483,7 +485,7 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
             <button
                 className="px-2.5 lg:px-4 py-2 bg-white dark:bg-base-100 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-base-200 transition-colors flex items-center gap-2 shadow-sm border border-gray-200/50 dark:border-base-300 relative z-[100]"
                 onClick={() => {
-                    console.log('AddAccountDialog button clicked');
+                    if (initialTab) setActiveTab(initialTab);
                     setIsOpen(true);
                 }}
                 title={!showText ? t('accounts.add_account') : undefined}
@@ -508,7 +510,7 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
 
                         {/* Tab 导航 - 胶囊风格 */}
 
-                        <div className="bg-gray-100 dark:bg-base-200 p-1 rounded-xl mb-6 grid grid-cols-3 gap-1">
+                        <div className="bg-gray-100 dark:bg-base-200 p-1 rounded-xl mb-6 grid grid-cols-2 sm:grid-cols-4 gap-1">
                             <button
                                 className={`py-2 px-3 rounded-lg text-sm font-medium transition-all duration-200 ${activeTab === 'oauth'
                                     ? 'bg-white dark:bg-base-100 shadow-sm text-blue-600 dark:text-blue-400'
@@ -536,10 +538,19 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                             >
                                 {t('accounts.add.tabs.import')}
                             </button>
+                            <button
+                                type="button"
+                                className={`py-2 px-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'gemini-app'
+                                    ? 'bg-white dark:bg-base-100 shadow-sm text-blue-600 dark:text-blue-400'
+                                    : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-base-300'}`}
+                                onClick={() => setActiveTab('gemini-app')}
+                            >
+                                Gemini App
+                            </button>
                         </div>
 
                         {/* 账号类型选择：个人账号 vs 企业 / Google Cloud (Vertex AI) 账号 */}
-                        <div className="flex p-1 bg-gray-100 dark:bg-base-200 rounded-xl mb-4">
+                        {activeTab !== 'gemini-app' && <div className="flex p-1 bg-gray-100 dark:bg-base-200 rounded-xl mb-4">
                             <button
                                 type="button"
                                 className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium transition-all duration-200 ${accountType === 'personal'
@@ -566,10 +577,10 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                             >
                                 {t('accounts.type.enterprise', '企业 / GCP (Vertex AI)')}
                             </button>
-                        </div>
+                        </div>}
 
                         {/* 添加 Web 模式提示 */}
-                        {!isTauri() && (
+                        {activeTab !== 'gemini-app' && !isTauri() && (
                             <div className="alert alert-info mb-4 text-xs py-2 flex items-center gap-2 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-800">
                                 <Info className="w-4 h-4" />
                                 <span>{t('accounts.add.oauth.web_hint', '将在新窗口中打开 Google 登录页')}</span>
@@ -577,9 +588,10 @@ function AddAccountDialog({ onAdd, showText = true }: AddAccountDialogProps) {
                         )}
 
                         {/* 状态提示区 */}
-                        <StatusAlert />
+                        {activeTab !== 'gemini-app' && <StatusAlert />}
 
                         <div className="min-h-[200px]">
+                            {activeTab === 'gemini-app' && <GeminiAppTab />}
                             {/* OAuth 授权 */}
                             {activeTab === 'oauth' && (
                                 <div className="space-y-6 py-4">

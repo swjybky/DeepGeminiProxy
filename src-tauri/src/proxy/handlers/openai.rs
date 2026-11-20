@@ -2084,6 +2084,17 @@ pub async fn handle_chat_completions(
     >,
     Json(mut body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    use crate::proxy::upstream::gemini_app::{self, Endpoint};
+    if let Some(response) = gemini_app::dispatch(
+        state.gemini_app.as_deref(),
+        &state.enabled_models,
+        Some(Endpoint::Chat),
+        &body,
+    )
+    .await
+    {
+        return Ok(response);
+    }
     let clean_start = std::time::Instant::now();
     // [NEW] Check for Image Model Redirection
     let model_name = body
@@ -2318,10 +2329,11 @@ pub async fn handle_chat_completions(
     // [ROUTE SINGLE ENTRY] 路由只由 router 决定；variant 仅根据已路由的物理模型解析 spec。
     openai_req.model = {
         let mapping = state.custom_mapping.read().await;
-        crate::proxy::common::model_mapping::resolve_model_route_with_effort(
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
             &openai_req.model,
             &mapping,
             effort_hint.as_deref(),
+            Some(&state.token_manager),
         )
     };
     let variant_spec = crate::proxy::common::variant_mapping::resolve_spec_exact(
@@ -2390,11 +2402,13 @@ pub async fn handle_chat_completions(
     // 归一为路由意图 "none"，由路由层按官方档位数组降为最低档。
     let route_effort =
         crate::proxy::pipeline::routing_effort(client_switch.is_disabled(), effort_hint.as_deref());
-    let mapped_model = crate::proxy::common::model_mapping::resolve_model_route_with_effort(
-        &openai_req.model,
-        &*state.custom_mapping.read().await,
-        route_effort,
-    );
+    let mapped_model =
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
+            &openai_req.model,
+            &*state.custom_mapping.read().await,
+            route_effort,
+            Some(&token_manager),
+        );
     let anchor = SessionManager::openai_content_anchor(&openai_req);
     let session_scope = crate::proxy::thinking_store::SessionScope::resolve(
         &headers,
@@ -3612,6 +3626,19 @@ pub async fn handle_completions(
     >,
     Json(mut body): Json<Value>,
 ) -> Response {
+    use crate::proxy::upstream::gemini_app::{self, Endpoint};
+    let endpoint =
+        matches!(uri.path(), "/v1/responses" | "/responses").then_some(Endpoint::Responses);
+    if let Some(response) = gemini_app::dispatch(
+        state.gemini_app.as_deref(),
+        &state.enabled_models,
+        endpoint,
+        &body,
+    )
+    .await
+    {
+        return response;
+    }
     let clean_start = std::time::Instant::now();
     debug!(
         "Received /v1/completions or /v1/responses payload: {} bytes",
@@ -4396,11 +4423,13 @@ pub async fn handle_completions(
         .is_disabled(),
         effort_hint,
     );
-    let mapped_model = crate::proxy::common::model_mapping::resolve_model_route_with_effort(
-        &openai_req.model,
-        &*state.custom_mapping.read().await,
-        route_effort,
-    );
+    let mapped_model =
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
+            &openai_req.model,
+            &*state.custom_mapping.read().await,
+            route_effort,
+            Some(&state.token_manager),
+        );
     let trace_id = format!("req_{}", chrono::Utc::now().timestamp_subsec_millis());
     if debug_logger::is_enabled(&debug_cfg) {
         if let Some(ledger) = normalized_interaction_ledger {
@@ -5778,8 +5807,22 @@ mod model_probe_compatibility_tests {
 }
 
 pub async fn handle_list_models(State(state): State<AppState>) -> impl IntoResponse {
+    use crate::proxy::{common::model_gate::is_model_enabled, upstream::gemini_app};
     let entries = crate::proxy::handlers::common::collect_model_list_entries(&state).await;
-    let data = crate::proxy::handlers::common::openai_style_model_objects(entries);
+    let mut data = crate::proxy::handlers::common::openai_style_model_objects(entries);
+    if state
+        .gemini_app
+        .as_ref()
+        .is_some_and(|pool| pool.available())
+    {
+        let enabled = state.enabled_models.read().await;
+        data.extend(
+            gemini_app::MODELS
+                .iter()
+                .filter(|model| is_model_enabled(enabled.as_deref(), model.public))
+                .map(gemini_app::AppModel::metadata),
+        );
+    }
 
     Json(json!({
         "object": "list",
@@ -5796,6 +5839,21 @@ pub async fn handle_retrieve_model(
     use crate::proxy::common::model_mapping::{
         find_dynamic_model, get_all_dynamic_models_metadata,
     };
+    use crate::proxy::{common::model_gate::is_model_enabled, upstream::gemini_app};
+
+    if gemini_app::is_app_model_id(&model) {
+        if let Some(model) = gemini_app::find_model(&model) {
+            if state
+                .gemini_app
+                .as_ref()
+                .is_some_and(|pool| pool.available())
+                && is_model_enabled(state.enabled_models.read().await.as_deref(), model.public)
+            {
+                return Json(model.metadata()).into_response();
+            }
+        }
+        return gemini_app::model_not_found();
+    }
 
     // [MODEL GATE] GET /v1/models/:model 探测端点同样接入门禁（含已下线模型族 404）
     if let Err(rejection) = crate::proxy::handlers::common::enforce_model_gate(
@@ -7346,6 +7404,23 @@ async fn handle_websocket_session(mut socket: WebSocket, headers: HeaderMap, sta
                 &payload_log,
             )
             .await;
+        }
+
+        if payload
+            .get("model")
+            .and_then(Value::as_str)
+            .is_some_and(crate::proxy::upstream::gemini_app::is_app_model_id)
+        {
+            let event = json!({
+                "type": "error",
+                "error": {
+                    "type": "invalid_request_error",
+                    "code": "gemini_app_unsupported_endpoint",
+                    "message": "Gemini App models require HTTP POST /v1/responses, not WebSocket."
+                }
+            });
+            let _ = socket.send(Message::Text(event.to_string())).await;
+            continue;
         }
 
         if should_handle_prewarm_locally(&payload, &session_state) {

@@ -4,9 +4,6 @@
         "tag": "推荐",
         "desc": "客户端直控模式与自定义 Token 档位已下线：具备 thinkingLevel 的模型由模型档位直接决定等级（low / medium / high），其余模型沿用官方 thinkingBudget 默认值。客户端传入的思考档位仅在无后缀（裸）模型上生效，用于选择具体档位模型。"
     },
-    "hub_update": {
-        "available": "antigravity hub latest: {{version}}，如果请求正常请忽略"
-    },
     "common": {
         "loading": "加载中...",
         "load_more": "加载更多",
@@ -265,6 +262,9 @@
         "edit_label": "编辑标签",
         "activation": {
             "title": "用此账号启动 Antigravity",
+            "action": "切号启动",
+            "select_client": "选择要启动的客户端",
+            "confirm": "确认启动",
             "current_account": "已登录此账号",
             "signed_in_as": "当前登录 {{email}}",
             "no_account": "未检测到登录账号"
@@ -426,6 +426,37 @@
                 "oauth": "OAuth 授权",
                 "token": "Refresh Token",
                 "import": "从数据库导入"
+            },
+            "gemini_app": {
+                "description": "通过 Google 授权，将账号加入独立的 Gemini App 反代池。",
+                "gateway_description": "已配置本机 App2API 上游。请在 App2API 管理页登录 Google、管理账号并测试模型。DeepGeminiProxy 不保存这部分 Google 授权。",
+                "gateway_config_invalid": "App2API 配置无效。请检查 DeepGeminiProxy 启动环境中的网关 API Key 和本机地址，再完全重启。",
+                "web_hint": "请在运行网关的机器上打开本页面，以接收本地授权回调。",
+                "start": "使用 Google 登录",
+                "open_google": "打开 Google 登录页",
+                "waiting": "正在等待 Google 授权…",
+                "success": "账号已加入 Gemini App 池，尚未验证模型权限。",
+                "pool": "Gemini App 账号",
+                "manage_pool": "管理 Gemini App 账号",
+                "automatic_pool": "反代时自动从独立账号池选择，不固定当前账号。",
+                "no_ranking": "以下账号已授权，暂不按配额排名；模型是否可用以上游响应为准。",
+                "none_authorized": "暂无已授权的 Gemini App 账号。",
+                "empty": "暂无 Gemini App 账号。",
+                "authorized": "已授权",
+                "needs_login": "需要重新登录",
+                "remove": "移除",
+                "confirm_remove": "从 Gemini App 池移除此账号？",
+                "errors": {
+                    "oauth_profile_required": "请先配置已获 Gemini App 权限的 Google OAuth 客户端和授权范围，再重启 DeepGeminiProxy。",
+                    "oauth_profile_invalid": "Gemini App OAuth 配置无效。",
+                    "oauth_login_pending": "已有一个 Gemini App 授权在进行中。",
+                    "copy_failed": "无法复制授权链接，请用浏览器打开授权页面。",
+                    "oauth_timeout": "Google 授权超时，请重试。",
+                    "oauth_denied": "Google 授权被拒绝。",
+                    "oauth_token_rejected": "Google 拒绝了令牌交换，请检查 OAuth 配置。",
+                    "oauth_refresh_token_missing": "Google 未签发刷新令牌，请检查 OAuth 客户端是否允许离线访问。",
+                    "request_failed": "Gemini App 操作失败，请重试或检查 OAuth 配置。"
+                }
             },
             "oauth": {
                 "enterprise_title": "Google Cloud / Vertex AI 企业授权",
@@ -912,6 +943,8 @@
                 "enable_all": "全部启用",
                 "disable_all": "全部禁用",
                 "all_enabled": "默认启用全部模型，包括之后新增的模型。",
+                "grouping_hint": "同一模型的思考档位合并显示，调用时通过请求参数选择。标有「−」的模型仅启用了部分档位，点击可启用整组。",
+                "loading": "正在拉取模型列表…",
                 "selected": "已启用 {{count}} 个模型",
                 "unsaved": "点击上方「保存」应用模型选择。",
                 "fetch_failed": "拉取模型列表失败：{{error}}",
@@ -1612,7 +1645,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent 接入",
-                "deepwrite_hint": "先完全退出 DeepWrite（⌘Q）。开启后，Gemini 模型将出现在自定义模型的 DeepGemini 分组中。",
+                "deepwrite_hint": "无需退出 DeepWrite。开启后，Gemini 模型将添加到自定义模型的 DeepGemini 分组。",
                 "description": "打开开关，自动配置网关地址、密钥和模型。",
                 "connection_changed": "连接配置已变更",
                 "key_required": "请先设置网关 API 密钥，再开启 Agent 接入。",

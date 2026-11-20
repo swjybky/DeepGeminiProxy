@@ -287,7 +287,7 @@ export default function ApiProxy() {
         return () => clearInterval(cfInterval);
     }, []);
 
-    // 动态获取应用启动时探测到的官方 Hub 版本信息
+    // 读取官方 Hub 版本和当前指纹，作为 User-Agent 设置的参考
     const loadHubFingerprintInfo = async () => {
         try {
             const updateStatus = await invoke<{ current: string; latest?: string; update_available: boolean }>('check_hub_update');

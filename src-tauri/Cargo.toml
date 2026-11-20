@@ -1,6 +1,6 @@
 [package]
 name = "antigravity-tools"
-version = "1.0.0"
+version = "1.0.1"
 description = "Antigravity Tools"
 authors = ["you"]
 license = "CC-BY-NC-SA-4.0"
@@ -27,7 +27,7 @@ yaml-rt = { version = "0.3.1", default-features = false }
 uuid = { version = "1.10", features = ["v4", "serde"] }
 chrono = "0.4"
 dirs = "5.0"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "socks", "blocking", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "socks", "blocking", "rustls-tls", "http2"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

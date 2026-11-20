@@ -195,11 +195,13 @@ pub async fn handle_generate(
     });
     let route_effort = crate::proxy::pipeline::routing_effort(explicit_disable, client_effort);
 
-    let initial_mapped_model = crate::proxy::common::model_mapping::resolve_model_route_with_effort(
-        &model_name,
-        &*state.custom_mapping.read().await,
-        route_effort,
-    );
+    let initial_mapped_model =
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
+            &model_name,
+            &*state.custom_mapping.read().await,
+            route_effort,
+            Some(&token_manager),
+        );
 
     while let Some(attempt) = next_rotation_attempt(
         &mut used_attempts,
@@ -1439,11 +1441,13 @@ pub async fn execute_count_tokens(
             || tc.get("thinkingBudget").and_then(|v| v.as_i64()) == Some(0)
     });
 
-    let mapped_model = crate::proxy::common::model_mapping::resolve_model_route_with_effort(
-        &model_name,
-        &*state.custom_mapping.read().await,
-        crate::proxy::pipeline::routing_effort(explicit_disable, client_effort),
-    );
+    let mapped_model =
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
+            &model_name,
+            &*state.custom_mapping.read().await,
+            crate::proxy::pipeline::routing_effort(explicit_disable, client_effort),
+            Some(&state.token_manager),
+        );
 
     // 2. 解析请求配置并获取 Token
     let config = crate::proxy::mappers::common_utils::resolve_request_config(

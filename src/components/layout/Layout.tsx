@@ -11,7 +11,6 @@ import { PedalBanner } from '../pedal/PedalBanner';
 import MiniView from './MiniView';
 import { useEffect } from 'react';
 import { isTauri } from '../../utils/env';
-import { ensureFullViewState } from '../../utils/windowManager';
 
 function Layout() {
     const { isMiniView } = useViewStore();
@@ -42,15 +41,6 @@ function Layout() {
         }, 60000);
         return () => clearInterval(timer);
     }, [updateAccountPriority, toggleProxyStatus]);
-
-    // Ensure correct window state when in Full View (not Mini View)
-    // This handles the case where the app was closed in Mini View (small size, no decorations)
-    // and restarted (defaults to Full View state but keeps last window properties)
-    useEffect(() => {
-        if (!isMiniView && isTauri()) {
-            ensureFullViewState();
-        }
-    }, [isMiniView]);
 
     if (!isTauri() && isMiniView) {
         return (

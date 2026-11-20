@@ -1037,10 +1037,11 @@ pub async fn handle_messages(
     // 解析 spec（budget / max / supports_thinking），不再做第二套档位选择。
     request.model = {
         let mapping = state.custom_mapping.read().await;
-        crate::proxy::common::model_mapping::resolve_model_route_with_effort(
+        crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
             &request.model,
             &mapping,
             effort_hint.as_deref(),
+            Some(&state.token_manager),
         )
     };
     if let Some(spec) = apply_routed_spec(&mut request, effective_budget_hint) {
@@ -1742,11 +1743,13 @@ pub async fn handle_messages(
         }
 
         // 2. 模型路由解析
-        let mapped_model = crate::proxy::common::model_mapping::resolve_model_route_with_effort(
-            &request_for_body.model,
-            &*state.custom_mapping.read().await,
-            effort_hint.as_deref(),
-        );
+        let mapped_model =
+            crate::proxy::common::model_mapping::resolve_model_route_with_effort_and_pool(
+                &request_for_body.model,
+                &*state.custom_mapping.read().await,
+                effort_hint.as_deref(),
+                Some(&token_manager),
+            );
         last_mapped_model = Some(mapped_model.clone());
 
         // 将 Claude 工具转为 Value 数组以便探测联网

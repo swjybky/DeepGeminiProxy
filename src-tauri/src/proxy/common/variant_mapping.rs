@@ -723,10 +723,9 @@ mod tests {
 
     #[test]
     fn test_resolve_38_flash_variants() {
-        // 无后缀的 3.x Flash 裸模型依据思考档位路由（未指定档位遵循统一决策链优先选择 tiered）
+        // 裸模型未指定档位时优先选 high，不与 tiered 合并。
         let s = resolve("gemini-3.8-flash", None).unwrap();
-        assert_eq!(s.id, "gemini-3.8-flash-tiered");
-        // 官方 tiered = thinkingBudget -1：自适应，不写数字预算
+        assert_eq!(s.id, "gemini-3.8-flash-high");
         assert_eq!(s.thinking_budget, 0);
         assert_eq!(s.max_output_tokens, 65536);
 

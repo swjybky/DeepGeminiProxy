@@ -9,6 +9,7 @@ import {
     Laptop,
     Code2,
     Terminal,
+    Smartphone,
     ArrowRight,
     HelpCircle
 } from 'lucide-react';
@@ -17,6 +18,8 @@ import { useTranslation } from 'react-i18next';
 import { getGroupQuotaSummaries, GroupQuotaSummary } from '../../utils/quotaDisplay';
 import { GroupQuotaCard } from '../accounts/GroupQuotaCard';
 import { getLiveLimitForModel } from '../../utils/liveLimit';
+import { GeminiAppDashboardPool } from './GeminiAppDashboardPool';
+import { useGeminiAppAccounts } from '../../stores/useGeminiAppAccounts';
 
 interface CurrentAccountProps {
     account?: Account | null;
@@ -26,7 +29,7 @@ interface CurrentAccountProps {
     onSwitch?: (targetIde?: string) => void;
 }
 
-type ClientTab = 'classic' | 'ide' | 'agy';
+type ClientTab = 'classic' | 'ide' | 'agy' | 'app';
 
 function CurrentAccount({
     account,
@@ -35,6 +38,7 @@ function CurrentAccount({
     onSwitch
 }: CurrentAccountProps) {
     const { t } = useTranslation();
+    const hasAppAccount = useGeminiAppAccounts(state => state.accounts.some(account => !account.needs_login));
 
     // 默认定位到有活跃账号的 Tab，优先经典款或 IDE
     const [activeTab, setActiveTab] = useState<ClientTab>(() => {
@@ -79,6 +83,13 @@ function CurrentAccount({
             tooltip: t('accounts.client_cli_tooltip', '当前 Antigravity CLI (agy) 登录账号'),
             activeBg: 'bg-emerald-600 text-white shadow-xs',
             activeDot: 'bg-emerald-400',
+        },
+        {
+            key: 'app' as ClientTab,
+            label: 'App',
+            icon: Smartphone,
+            tooltip: t('accounts.add.gemini_app.pool'),
+            activeBg: 'bg-violet-600 text-white shadow-xs',
         },
     ];
 
@@ -138,12 +149,13 @@ function CurrentAccount({
                     {clientTabs.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.key;
-                        const hasAccount = !!getClientAccountId(tab.key);
+                        const hasAccount = tab.key === 'app' ? hasAppAccount : !!getClientAccountId(tab.key);
                         return (
                             <button
                                 key={tab.key}
                                 onClick={() => setActiveTab(tab.key)}
                                 title={tab.tooltip}
+                                aria-pressed={isActive}
                                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                                     isActive
                                         ? tab.activeBg
@@ -166,7 +178,7 @@ function CurrentAccount({
             </div>
 
             {/* 账号详情或空状态 */}
-            {!displayedAccount ? (
+            {activeTab === 'app' ? <GeminiAppDashboardPool /> : !displayedAccount ? (
                 <div className="flex-1 flex flex-col items-center justify-center py-6 text-center">
                     <div className="w-12 h-12 rounded-2xl bg-gray-100 dark:bg-base-200 flex items-center justify-center text-gray-400 mb-2.5">
                         <HelpCircle className="w-6 h-6 text-gray-400/80" />

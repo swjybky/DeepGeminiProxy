@@ -374,23 +374,12 @@ pub async fn get_all_dynamic_models(
         }
     }
 
-    // 4. 动态档位后缀剥离与裸模型派生（纯通用数据驱动）：
-    // 若账号实际支持的模型包含分档或思考后缀（如 -high / -medium / -low / -extra-low / -tiered / -thinking），
-    // 自动剥离后缀并衍生对应的无后缀裸模型名（如 gemini-4-argon, gemini-3.8-flash, claude-opus-5-5, claude-sonnet-5-5, claude-opus-4-6, gpt-oss-120b）。
+    // 4. 从具体档位派生可调用的无档位入口，同时保留历史 -tiered/-thinking 别名。
     let mut derived_bare_models = HashSet::new();
     for id in &model_ids {
-        for suffix in &[
-            "-tiered",
-            "-high",
-            "-medium",
-            "-low",
-            "-extra-low",
-            "-thinking",
-        ] {
-            if let Some(base) = id.strip_suffix(suffix) {
-                if !base.is_empty() && is_model_compliant_with_baseline(base) {
-                    derived_bare_models.insert(base.to_string());
-                }
+        if !custom_keys.contains(id) {
+            if let Some(base) = derived_model_base(id) {
+                derived_bare_models.insert(base.to_string());
             }
         }
     }
@@ -423,6 +412,13 @@ pub async fn get_all_dynamic_models(
         .collect();
     sorted_ids.sort();
     sorted_ids
+}
+
+fn derived_model_base(id: &str) -> Option<&str> {
+    super::model_catalog::effort_base(id)
+        .or_else(|| id.strip_suffix("-tiered"))
+        .or_else(|| id.strip_suffix("-thinking"))
+        .filter(|base| !base.is_empty() && is_model_compliant_with_baseline(base))
 }
 
 /// 生图模型族变体归一化：剔除尺寸/分辨率/预览后缀，得到基底生图模型 ID。
@@ -514,23 +510,12 @@ pub async fn get_all_dynamic_models_metadata(
     // 动态档位后缀剥离与裸模型元数据派生继承
     let mut derived_metas = std::collections::HashMap::new();
     for (name, meta) in &meta_map {
-        for suffix in &[
-            "-tiered",
-            "-high",
-            "-medium",
-            "-low",
-            "-extra-low",
-            "-thinking",
-        ] {
-            if let Some(base) = name.strip_suffix(suffix) {
-                if !base.is_empty() && is_model_compliant_with_baseline(base) {
-                    let mut m = meta.clone();
-                    if let Some(ref dn) = m.display_name {
-                        m.display_name = Some(clean_tier_from_display_name(dn));
-                    }
-                    derived_metas.entry(base.to_string()).or_insert(m);
-                }
+        if let Some(base) = derived_model_base(name) {
+            let mut m = meta.clone();
+            if let Some(ref dn) = m.display_name {
+                m.display_name = Some(clean_tier_from_display_name(dn));
             }
+            derived_metas.entry(base.to_string()).or_insert(m);
         }
     }
     for (k, v) in derived_metas {
@@ -894,7 +879,7 @@ pub fn resolve_adaptive_target(
 /// * `original_model` - 原始模型名称
 /// * `custom_mapping` - 用户自定义映射表
 /// * `client_effort` - 客户端指定的思考强度/档位（如 Some("low"), Some("high") 等）
-/// * `token_manager` - 可选号池管理器指针，用于驱动 `auto:*` 自适应号池探测
+/// * `token_manager` - 可选号池，用于读取当前可用档位和 `auto:*` 自适应目标
 ///
 /// # 返回
 /// 映射后的目标模型名称
@@ -920,9 +905,11 @@ pub fn resolve_model_route_with_effort_and_pool(
             .filter(|s| !s.is_empty() && *s != "default")
             .is_some();
         if has_explicit_effort {
-            if let Some(routed) =
-                crate::proxy::model_specs::resolve_bare_tiered_model_route(&target, client_effort)
-            {
+            if let Some(routed) = crate::proxy::model_specs::DynamicTierRouter::resolve_with_pool(
+                &target,
+                client_effort,
+                token_manager,
+            ) {
                 crate::modules::logger::log_info(&format!(
                     "[Router] 自定义映射目标依据显式思考档位路由: {} (target={}, effort={:?}) -> {}",
                     original_model, target, client_effort, routed
@@ -942,9 +929,7 @@ pub fn resolve_model_route_with_effort_and_pool(
         return map_claude_model_to_gemini(original_model);
     }
 
-    // 裸模型依据客户端思考档位通用路由（覆盖 3.x Flash 与 Claude >= 5.0）：
-    // - 对于 Flash：默认 high，支持 low / medium
-    // - 对于 Claude：默认 medium，支持 low / high
+    // 裸模型按其可用档位解析；缺省优先 high。
     let target_model = map_claude_model_to_gemini(original_model);
     let target_ref = if target_model != original_model {
         target_model.as_str()
@@ -952,9 +937,11 @@ pub fn resolve_model_route_with_effort_and_pool(
         original_model
     };
 
-    if let Some(routed) =
-        crate::proxy::model_specs::resolve_bare_tiered_model_route(target_ref, client_effort)
-    {
+    if let Some(routed) = crate::proxy::model_specs::DynamicTierRouter::resolve_with_pool(
+        target_ref,
+        client_effort,
+        token_manager,
+    ) {
         crate::modules::logger::log_info(&format!(
             "[Router] 裸模型依据思考档位通用路由: {} (target={}, effort={:?}) -> {}",
             original_model, target_ref, client_effort, routed
@@ -1349,14 +1336,14 @@ mod tests {
     fn test_gemini_3x_flash_wildcard_route() {
         let mut custom = HashMap::new();
 
-        // 1. 3.x Flash 裸模型依据思考档位路由 (未指定时优先遵循决策链 tiered，显式传档位时路由至对应档位)
+        // 裸模型默认选 high；显式指定档位时路由到对应变体。
         assert_eq!(
             resolve_model_route_with_effort("gemini-3.8-flash", &custom, Some("high")),
             "gemini-3.8-flash-high"
         );
         assert_eq!(
             resolve_model_route("gemini-3.8-flash", &custom),
-            "gemini-3.8-flash-tiered"
+            "gemini-3.8-flash-high"
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-3.8-flash", &custom, Some("low")),
@@ -1519,10 +1506,10 @@ mod tests {
             "gemini-3.1-pro-high"
         );
 
-        // 3. 衍生裸模型 claude-opus-5-5 / gemini-4-argon 缺省 effort 遵循决策链 (取 medium)
+        // 3. 分档模型未携带 effort 时优先使用 high。
         assert_eq!(
             resolve_model_route_with_effort("claude-opus-5-5", &empty, None),
-            "claude-opus-5-5-medium"
+            "claude-opus-5-5-high"
         );
         assert_eq!(
             resolve_model_route_with_effort("claude-opus-5-5", &empty, Some("high")),
@@ -1530,7 +1517,7 @@ mod tests {
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-4-argon", &empty, None),
-            "gemini-4-argon-medium"
+            "gemini-4-argon-high"
         );
         assert_eq!(
             resolve_model_route_with_effort("gemini-4-argon", &empty, Some("high")),
@@ -1555,11 +1542,11 @@ mod tests {
             "gemini-3.1-pro-high"
         );
 
-        // 5. Claude Code 2.1.312 自适应暗路由模型档位路由 (基于 default_custom_mapping)
+        // 5. 自适应映射保留目标裸名，只有显式 effort 才在此处细化档位。
         let default_custom = crate::proxy::config::default_custom_mapping();
         assert_eq!(
             resolve_model_route_with_effort("claude-fable-5", &default_custom, None),
-            "claude-opus-5-5-medium"
+            "claude-opus-5-5"
         );
         assert_eq!(
             resolve_model_route_with_effort("claude-fable-5", &default_custom, Some("high")),
@@ -1567,7 +1554,7 @@ mod tests {
         );
         assert_eq!(
             resolve_model_route_with_effort("claude-fable-5-1", &default_custom, None),
-            "claude-opus-5-5-medium"
+            "claude-opus-5-5"
         );
         assert_eq!(
             resolve_model_route_with_effort("claude-haiku-4-5", &default_custom, None),

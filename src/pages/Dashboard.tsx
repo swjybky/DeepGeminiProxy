@@ -20,6 +20,7 @@ import BestAccounts from '../components/dashboard/BestAccounts';
 import { findImageQuotaModel, findQuotaModel } from '../config/modelConfig';
 import CurrentAccount from '../components/dashboard/CurrentAccount';
 import { useAccountStore } from '../stores/useAccountStore';
+import { useGeminiAppAccounts } from '../stores/useGeminiAppAccounts';
 import { useConfigStore } from '../stores/useConfigStore';
 import { Account } from '../types/account';
 import { DashboardQuotaView } from '../utils/quotaDisplay';
@@ -41,6 +42,13 @@ function Dashboard() {
     } = useAccountStore();
     const { config, saveConfig } = useConfigStore();
     const qosAutoJail = !!config?.proxy?.qos_auto_jail;
+    const refreshAppAccounts = useGeminiAppAccounts(state => state.refresh);
+    useEffect(() => {
+        const refresh = () => { void refreshAppAccounts().catch(() => {}); };
+        refresh();
+        window.addEventListener('focus', refresh);
+        return () => window.removeEventListener('focus', refresh);
+    }, [refreshAppAccounts]);
 
     const handleToggleQoSAutoJail = async () => {
         if (!config) return;
