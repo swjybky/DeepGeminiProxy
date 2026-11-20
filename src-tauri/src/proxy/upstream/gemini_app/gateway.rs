@@ -79,6 +79,42 @@ impl Gateway {
         })
     }
 
+    pub(super) async fn control<T: serde::de::DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+    ) -> Result<T, &'static str> {
+        let response = self
+            .client
+            .request(
+                method,
+                self.base
+                    .join(path)
+                    .map_err(|_| "gemini_app_embedded_request_failed")?,
+            )
+            .header(header::AUTHORIZATION, self.authorization.clone())
+            .timeout(Duration::from_secs(8))
+            .send()
+            .await
+            .map_err(|_| "gemini_app_embedded_unavailable")?;
+        if response.status().is_success() {
+            response
+                .json()
+                .await
+                .map_err(|_| "gemini_app_embedded_request_failed")
+        } else {
+            let body: Value = response
+                .json()
+                .await
+                .map_err(|_| "gemini_app_embedded_request_failed")?;
+            Err(super::embedded::public_error(
+                body.get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ))
+        }
+    }
+
     pub(super) async fn generate(
         &self,
         endpoint: Endpoint,

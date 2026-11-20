@@ -28,6 +28,8 @@ dist
 
 # Build output
 src-tauri/target/
+src-tauri/resources/app2api-runtime/*
+!src-tauri/resources/app2api-runtime/.gitkeep
 src-tauri/gen/
 src-tauri/.env
 

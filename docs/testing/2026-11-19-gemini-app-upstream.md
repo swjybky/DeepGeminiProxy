@@ -17,4 +17,6 @@
 
 `v1.0.1` 发布候选：在隔离数据目录启动 macOS 无头构建。`/health` 返回 `200`，匿名账号请求返回 `401`，鉴权后账号列表为空、网关状态未配置，未配置 OAuth 时发起登录返回 `503 oauth_profile_required` 且不写账号文件。`variant_mapping` 和 `official_alignment_tests` 分别仍有 6 项和 4 项失败；在 `v1.0.0` 上复现了同样的失败。
 
-未覆盖：未启动真实 App2API、登录 Google、调用真实模型，未验证 Tauri 控件路径或目标 SDK。截图基线未能获取，未做浅色、深色及窄窗口的视觉验收。启用方式见[上游接入说明](../proxy/gemini-app.md)。
+内置 App2API 模式（macOS arm64）：`npm run app2api:prepare` 校验固定源码并准备运行时。`cargo test --manifest-path src-tauri/Cargo.toml --locked --lib embedded_runtime_starts_and_owns_the_login_flow -- --ignored` 通过：实际启动随包引擎，验证单实例文件锁、禁止独立后台、空账号请求返回 503、可发起和取消本机 OAuth 流程、退出后可重新获取锁。`npm run tauri build -- --debug --ci --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked` 成功生成 `DeepGeminiProxy.app`；确认包内 Node.js 可运行且两份许可证齐全。15 项定向 Rust 回归、格式检查和 `git diff --check` 通过。
+
+未覆盖：未登录真实 Google 账号或调用真实模型，未验证 Windows/Linux/Docker 产物、已鉴权的 Web/Tauri 控件或目标 SDK。未改变布局，未做视觉验收。启用方式见[上游接入说明](../proxy/gemini-app.md)。

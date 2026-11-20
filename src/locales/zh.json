@@ -449,6 +449,8 @@
                 "errors": {
                     "oauth_profile_required": "请先配置已获 Gemini App 权限的 Google OAuth 客户端和授权范围，再重启 DeepGeminiProxy。",
                     "oauth_profile_invalid": "Gemini App OAuth 配置无效。",
+                    "gemini_app_embedded_unavailable": "无法启动内置 Gemini App 引擎，请重启 DeepGeminiProxy 或重新安装完整安装包。",
+                    "gemini_app_embedded_in_use": "另一个 DeepGeminiProxy 进程正在使用此 Gemini App 数据目录。",
                     "oauth_login_pending": "已有一个 Gemini App 授权在进行中。",
                     "copy_failed": "无法复制授权链接，请用浏览器打开授权页面。",
                     "oauth_timeout": "Google 授权超时，请重试。",

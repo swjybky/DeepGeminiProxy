@@ -16,25 +16,24 @@ pub(crate) fn gemini_app_gateway_status() -> Result<Option<&'static str>, &'stat
     Ok(GeminiApp::shared()?.gateway_status())
 }
 #[tauri::command]
-pub(crate) fn gemini_app_accounts() -> Result<Vec<AccountView>, &'static str> {
-    Ok(GeminiApp::shared()?.accounts())
+pub(crate) async fn gemini_app_accounts() -> Result<Vec<AccountView>, &'static str> {
+    GeminiApp::shared()?.managed_accounts().await
 }
 #[tauri::command]
 pub(crate) async fn gemini_app_login_start() -> Result<LoginStart, &'static str> {
-    GeminiApp::shared()?.begin_login().await
+    GeminiApp::shared()?.managed_start().await
 }
 #[tauri::command]
-pub(crate) fn gemini_app_login_status(id: Uuid) -> Result<LoginView, &'static str> {
-    GeminiApp::shared()?.login_status(id)
+pub(crate) async fn gemini_app_login_status(id: Uuid) -> Result<LoginView, &'static str> {
+    GeminiApp::shared()?.managed_login_status(id).await
 }
 #[tauri::command]
-pub(crate) fn gemini_app_login_cancel(id: Uuid) -> Result<(), &'static str> {
-    GeminiApp::shared()?.cancel_login(id);
-    Ok(())
+pub(crate) async fn gemini_app_login_cancel(id: Uuid) -> Result<(), &'static str> {
+    GeminiApp::shared()?.managed_cancel(id).await
 }
 #[tauri::command]
-pub(crate) fn gemini_app_account_remove(id: Uuid) -> Result<(), &'static str> {
-    GeminiApp::shared()?.remove_account(id)
+pub(crate) async fn gemini_app_account_remove(id: Uuid) -> Result<(), &'static str> {
+    GeminiApp::shared()?.managed_remove(id).await
 }
 
 type WebError = (StatusCode, Json<Value>);
@@ -45,9 +44,11 @@ fn web_provider(state: AppState) -> Result<Arc<GeminiApp>, WebError> {
 }
 fn web_error(code: &'static str) -> WebError {
     let status = match code {
-        "oauth_profile_required" | "oauth_profile_invalid" | "account_store_unavailable" => {
-            StatusCode::SERVICE_UNAVAILABLE
-        }
+        "oauth_profile_required"
+        | "oauth_profile_invalid"
+        | "account_store_unavailable"
+        | "gemini_app_embedded_unavailable"
+        | "gemini_app_embedded_in_use" => StatusCode::SERVICE_UNAVAILABLE,
         "oauth_login_pending" | "gemini_app_gateway_managed" => StatusCode::CONFLICT,
         "oauth_flow_not_found" => StatusCode::NOT_FOUND,
         _ => StatusCode::BAD_REQUEST,
@@ -63,11 +64,15 @@ pub(crate) async fn web_gateway_status(
 pub(crate) async fn web_list(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<AccountView>>, WebError> {
-    Ok(Json(web_provider(state)?.accounts()))
+    web_provider(state)?
+        .managed_accounts()
+        .await
+        .map(Json)
+        .map_err(web_error)
 }
 pub(crate) async fn web_start(State(state): State<AppState>) -> Result<Json<LoginStart>, WebError> {
     web_provider(state)?
-        .begin_login()
+        .managed_start()
         .await
         .map(Json)
         .map_err(web_error)
@@ -77,7 +82,8 @@ pub(crate) async fn web_status(
     Path(id): Path<Uuid>,
 ) -> Result<Json<LoginView>, WebError> {
     web_provider(state)?
-        .login_status(id)
+        .managed_login_status(id)
+        .await
         .map(Json)
         .map_err(web_error)
 }
@@ -85,13 +91,19 @@ pub(crate) async fn web_cancel(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, WebError> {
-    web_provider(state)?.cancel_login(id);
+    web_provider(state)?
+        .managed_cancel(id)
+        .await
+        .map_err(web_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
 pub(crate) async fn web_remove(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, WebError> {
-    web_provider(state)?.remove_account(id).map_err(web_error)?;
+    web_provider(state)?
+        .managed_remove(id)
+        .await
+        .map_err(web_error)?;
     Ok(StatusCode::NO_CONTENT)
 }

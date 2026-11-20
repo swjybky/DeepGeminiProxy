@@ -451,6 +451,8 @@
                 "errors": {
                     "oauth_profile_required": "Configure a Google OAuth client and scope authorized for Gemini App, then restart DeepGeminiProxy.",
                     "oauth_profile_invalid": "The Gemini App OAuth profile is invalid.",
+                    "gemini_app_embedded_unavailable": "Could not start the bundled Gemini App engine. Restart DeepGeminiProxy or reinstall the full package.",
+                    "gemini_app_embedded_in_use": "Another DeepGeminiProxy process is using this Gemini App data directory.",
                     "oauth_login_pending": "A Gemini App sign-in is already in progress.",
                     "copy_failed": "Could not copy the authorization link. Open the Google sign-in page instead.",
                     "oauth_timeout": "Google authorization timed out. Start again.",

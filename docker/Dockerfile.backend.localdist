@@ -1,3 +1,9 @@
+# --- Embedded App2API Runtime ---
+FROM node:24-bookworm-slim AS app2api-builder
+WORKDIR /app
+COPY scripts/prepare-app2api.mjs scripts/app2api-embedded.mjs ./scripts/
+RUN node scripts/prepare-app2api.mjs
+
 # --- Backend Build Stage (uses local dist/) ---
 FROM rust:1-slim-bookworm AS backend-builder
 ARG USE_MIRROR=auto
@@ -88,6 +94,7 @@ RUN apt-get update && apt-get install -y \
 
 # Copy binary from builder
 COPY --from=backend-builder /tmp/antigravity-tools /app/antigravity-tools
+COPY --from=app2api-builder /app/src-tauri/resources/app2api-runtime /app/app2api-runtime
 
 # Copy frontend dist from local build context
 COPY dist /app/dist

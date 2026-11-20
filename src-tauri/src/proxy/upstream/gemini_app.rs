@@ -1,6 +1,16 @@
 //! In-process Gemini App provider; never uses the Antigravity token pool.
 mod accounts;
+mod embedded;
 mod gateway;
+
+pub(crate) use embedded::set_desktop_runtime;
+static INSTANCE: OnceLock<Arc<GeminiApp>> = OnceLock::new();
+
+pub(crate) async fn stop_embedded_if_started() {
+    if let Some(gemini) = INSTANCE.get() {
+        gemini.stop_embedded().await;
+    }
+}
 mod robin;
 
 pub(crate) use accounts::{AccountView, LoginStart, LoginView};
@@ -81,13 +91,13 @@ pub(crate) enum Endpoint {
 
 pub(crate) struct GeminiApp {
     gateway: Result<Option<gateway::Gateway>, &'static str>,
+    embedded: Option<embedded::Embedded>,
     pool: Result<accounts::Pool, &'static str>,
     client: reqwest::Client,
     capacity: Arc<tokio::sync::Semaphore>,
 }
 impl GeminiApp {
     pub(crate) fn shared() -> Result<Arc<Self>, &'static str> {
-        static INSTANCE: OnceLock<Arc<GeminiApp>> = OnceLock::new();
         static INIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
         if let Some(provider) = INSTANCE.get() {
             return Ok(provider.clone());
@@ -98,18 +108,33 @@ impl GeminiApp {
         }
         let root =
             crate::modules::account::get_data_dir().map_err(|_| "account_store_unavailable")?;
-        let provider = Arc::new(Self::new(
+        let gateway = gateway::Gateway::configured();
+        let embedded = if matches!(gateway, Ok(None)) {
+            embedded::Embedded::configured(&root.join("gemini-app2api"))
+        } else {
+            None
+        };
+        let provider = Arc::new(Self::with_backend(
             root.join("gemini-app-accounts.json"),
-            gateway::Gateway::configured(),
+            gateway,
+            embedded,
         )?);
         let _ = INSTANCE.set(provider.clone());
         Ok(provider)
     }
+    #[cfg(test)]
     fn new(
         path: std::path::PathBuf,
         gateway: Result<Option<gateway::Gateway>, &'static str>,
     ) -> Result<Self, &'static str> {
-        let pool = if matches!(gateway, Ok(None)) {
+        Self::with_backend(path, gateway, None)
+    }
+    fn with_backend(
+        path: std::path::PathBuf,
+        gateway: Result<Option<gateway::Gateway>, &'static str>,
+        embedded: Option<embedded::Embedded>,
+    ) -> Result<Self, &'static str> {
+        let pool = if matches!(gateway, Ok(None)) && embedded.is_none() {
             Ok(accounts::Pool::new(path)?)
         } else {
             // Do not load or change any old local Google grants in App2API mode.
@@ -126,6 +151,7 @@ impl GeminiApp {
             .map_err(|_| "gemini_app_client_unavailable")?;
         Ok(Self {
             gateway,
+            embedded,
             pool,
             client,
             capacity: Arc::new(tokio::sync::Semaphore::new(8)),
@@ -133,6 +159,7 @@ impl GeminiApp {
     }
     pub(crate) fn available(&self) -> bool {
         matches!(self.gateway, Ok(Some(_)))
+            || self.embedded.is_some()
             || self.pool.as_ref().is_ok_and(accounts::Pool::available)
     }
     pub(crate) fn gateway_status(&self) -> Option<&'static str> {
@@ -140,6 +167,47 @@ impl GeminiApp {
             Ok(Some(_)) => Some("configured"),
             Err(_) => Some("invalid"),
             Ok(None) => None,
+        }
+    }
+    pub(crate) async fn managed_accounts(&self) -> Result<Vec<AccountView>, &'static str> {
+        match &self.embedded {
+            Some(engine) => engine.accounts().await,
+            None => Ok(self.accounts()),
+        }
+    }
+    pub(crate) async fn managed_remove(&self, id: uuid::Uuid) -> Result<(), &'static str> {
+        match &self.embedded {
+            Some(engine) => engine.remove_account(id).await,
+            None => self.remove_account(id),
+        }
+    }
+    pub(crate) async fn managed_login_status(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<LoginView, &'static str> {
+        match &self.embedded {
+            Some(engine) => engine.login_status(id).await,
+            None => self.login_status(id),
+        }
+    }
+    pub(crate) async fn managed_cancel(&self, id: uuid::Uuid) -> Result<(), &'static str> {
+        match &self.embedded {
+            Some(engine) => engine.cancel_login(id).await,
+            None => {
+                self.cancel_login(id);
+                Ok(())
+            }
+        }
+    }
+    pub(crate) async fn managed_start(self: &Arc<Self>) -> Result<LoginStart, &'static str> {
+        match &self.embedded {
+            Some(engine) => engine.begin_login().await,
+            None => self.begin_login().await,
+        }
+    }
+    pub(crate) async fn stop_embedded(&self) {
+        if let Some(engine) = &self.embedded {
+            engine.stop().await;
         }
     }
     fn native_pool(&self) -> Result<&accounts::Pool, &'static str> {
@@ -268,7 +336,17 @@ pub(crate) async fn dispatch(
     };
     let result = match &provider.gateway {
         Ok(Some(gateway)) => gateway.generate(endpoint, model, body).await,
-        Ok(None) => provider.generate(endpoint, model, body).await,
+        Ok(None) => match &provider.embedded {
+            Some(engine) => match engine.gateway().await {
+                Ok(gateway) => gateway.generate(endpoint, model, body).await,
+                Err(code) => Err(AppError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    code,
+                    "Could not start the bundled Gemini App2API engine.",
+                )),
+            },
+            None => provider.generate(endpoint, model, body).await,
+        },
         Err(code) => Err(AppError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             code,

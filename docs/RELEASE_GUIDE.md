@@ -5,14 +5,14 @@
 ## 只打包，不发布
 
 - GitHub：工作流推送到默认分支后，在 **Actions → Package and Release → Run workflow** 选择要打包的分支，保持 `publish_release` 未勾选。完成后从该运行的 **Artifacts** 下载。
-- 本机 macOS：安装 Node.js、Rust、Xcode 命令行工具和 CMake 后，在仓库根目录运行：
+- 本机 macOS：安装 Node.js 22+（与构建目标同架构）、Rust、Xcode 命令行工具和 CMake 后，在仓库根目录运行：
 
   ```bash
   npm ci
   npm run tauri build -- --ci --bundles dmg --config '{"bundle":{"createUpdaterArtifacts":false}}'
   ```
 
-  安装包位于 `src-tauri/target/release/bundle/dmg/`，架构与本机一致。
+  安装包位于 `src-tauri/target/release/bundle/dmg/`，架构与本机一致。构建阶段下载并校验固定版本的 App2API，并随安装包分发 Node.js 运行时和第三方许可；用户不需要安装 Node.js。不要用不同架构的 Node.js 进程为该安装包准备资源。
 
 ## 发布 GitHub Release
 

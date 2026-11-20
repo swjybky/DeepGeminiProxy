@@ -115,14 +115,14 @@ struct Access {
     expiry: Instant,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct AccountView {
     id: Uuid,
     email: String,
     needs_login: bool,
 }
 
-#[derive(Clone, Copy, Serialize)]
+#[derive(Clone, Copy, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum LoginStatus {
     Pending,
@@ -133,13 +133,13 @@ pub(crate) enum LoginStatus {
 
 #[derive(Clone, Serialize)]
 pub(crate) struct LoginView {
-    status: LoginStatus,
-    error: Option<&'static str>,
+    pub(super) status: LoginStatus,
+    pub(super) error: Option<&'static str>,
 }
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub(crate) struct LoginStart {
-    flow_id: Uuid,
-    authorization_url: String,
+    pub(super) flow_id: Uuid,
+    pub(super) authorization_url: String,
 }
 struct Flow {
     id: Uuid,

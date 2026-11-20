@@ -560,6 +560,9 @@ pub fn run() {
         .manage(AppRuntimeFlags { tray_enabled })
         .setup(|app| {
             info!("Setup starting...");
+            if let Ok(resources) = app.path().resource_dir() {
+                crate::proxy::upstream::gemini_app::set_desktop_runtime(resources);
+            }
 
             // Initialize log bridge with app handle for debug console
             modules::log_bridge::init_log_bridge(app.handle().clone());
@@ -1006,6 +1009,7 @@ pub fn run() {
                 // Handle app exit - cleanup background tasks and release ports
                 tauri::RunEvent::Exit => {
                     tracing::info!("Application exiting, cleaning up background tasks and releasing ports...");
+                    tauri::async_runtime::block_on(crate::proxy::upstream::gemini_app::stop_embedded_if_started());
                     // 尽力把签名缓存队列刷入 SQLite，避免直接退出丢失最近写入。
                     crate::proxy::signature_cache::flush_on_exit();
                     if let Some(state) =
