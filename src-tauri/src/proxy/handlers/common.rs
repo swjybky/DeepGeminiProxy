@@ -138,6 +138,7 @@ pub async fn enforce_model_gate(
         requested_model,
         &state.custom_mapping,
         &state.token_manager,
+        &state.enabled_models,
     )
     .await;
 
@@ -197,8 +198,17 @@ pub async fn collect_model_list_entries(
     };
 
     let only_raw = *state.only_raw_quota_models.read().await;
-    let model_ids =
+    let mut model_ids =
         get_all_dynamic_models(&state.custom_mapping, Some(&state.token_manager), only_raw).await;
+    {
+        let enabled_models = state.enabled_models.read().await;
+        model_ids.retain(|id| {
+            crate::proxy::common::model_gate::is_model_enabled(enabled_models.as_deref(), id)
+        });
+    }
+    if model_ids.is_empty() {
+        return Vec::new();
+    }
     let metadata_map = get_all_dynamic_models_metadata(
         &state.custom_mapping,
         Some(&state.token_manager),

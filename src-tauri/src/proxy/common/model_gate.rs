@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 
 use axum::http::StatusCode;
+use tokio::sync::RwLock;
 
 use crate::proxy::common::model_mapping;
 use crate::proxy::token_manager::TokenManager;
@@ -23,6 +24,17 @@ use crate::proxy::token_manager::TokenManager;
 pub const MODEL_NOT_EXIST: &str = "model not exist";
 /// 网关自答文案：全池无配额（502）
 pub const NO_QUOTA_ACCOUNTS: &str = "no quota accounts";
+
+/// Apply the public ID policy before alias resolution and quota checks.
+pub fn is_model_enabled(enabled_models: Option<&[String]>, requested: &str) -> bool {
+    let requested = requested.trim();
+    let id = requested.strip_prefix("models/").unwrap_or(requested);
+    enabled_models.is_none_or(|models| {
+        models
+            .iter()
+            .any(|model| model.eq_ignore_ascii_case(requested) || model.eq_ignore_ascii_case(id))
+    })
+}
 
 /// 闸门裁决结果
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,9 +263,11 @@ pub async fn gate_inbound_model(
     requested_model: Option<&str>,
     custom_mapping: &tokio::sync::RwLock<HashMap<String, String>>,
     token_manager: &TokenManager,
+    enabled_models: &RwLock<Option<Vec<String>>>,
 ) -> ModelGate {
     let requested = requested_model.map(str::trim).unwrap_or("");
-    if requested.is_empty() {
+    if requested.is_empty() || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
+    {
         return ModelGate::NotFound;
     }
 
@@ -366,9 +380,11 @@ pub async fn gate_inbound_model_exists(
     requested_model: Option<&str>,
     custom_mapping: &tokio::sync::RwLock<HashMap<String, String>>,
     token_manager: &TokenManager,
+    enabled_models: &RwLock<Option<Vec<String>>>,
 ) -> ModelGate {
     let requested = requested_model.map(str::trim).unwrap_or("");
-    if requested.is_empty() {
+    if requested.is_empty() || !is_model_enabled(enabled_models.read().await.as_deref(), requested)
+    {
         return ModelGate::NotFound;
     }
 
@@ -506,6 +522,34 @@ pub fn blocked_explanation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_model_policy_matches_only_selected_ids() {
+        let enabled = vec!["gemini-3.8-flash".to_string(), "my-alias".to_string()];
+        assert!(is_model_enabled(None, "gemini-3.8-flash-low"));
+        assert!(!is_model_enabled(Some(&[]), "gemini-3.8-flash"));
+        assert!(is_model_enabled(Some(&enabled), "models/Gemini-3.8-Flash"));
+        assert!(is_model_enabled(Some(&enabled), "my-alias"));
+        assert!(!is_model_enabled(Some(&enabled), "gemini-3.8-flash-low"));
+    }
+
+    #[tokio::test]
+    async fn disabled_models_are_rejected_during_cold_start() {
+        let data = tempfile::tempdir().unwrap();
+        let tokens = TokenManager::new(data.path().to_path_buf());
+        let mapping = RwLock::new(HashMap::new());
+        let enabled = RwLock::new(Some(vec!["gemini-3.8-flash".to_string()]));
+
+        assert_eq!(
+            gate_inbound_model(Some("gemini-3.8-flash-low"), &mapping, &tokens, &enabled).await,
+            ModelGate::NotFound
+        );
+        assert_eq!(
+            gate_inbound_model_exists(Some("gemini-3-pro-image"), &mapping, &tokens, &enabled)
+                .await,
+            ModelGate::NotFound
+        );
+    }
 
     #[test]
     fn family_fallback_only_for_router_rewrites() {

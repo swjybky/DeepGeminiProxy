@@ -70,13 +70,14 @@
         "selected": "Selected",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "نسخ إلى الحافظة"
     },
     "nav": {
         "dashboard": "الرئيسية",
         "accounts": "الحسابات",
         "proxy": "وكيل API",
+        "agent_tools": "أدوات الوكلاء",
         "call_records": "سجلات المرور",
         "security": "إدارة IP",
         "token_stats": "إحصائيات Token",
@@ -107,7 +108,6 @@
         "switch_to_malay_short": "MY",
         "user_token": "رموز المستخدم",
         "security_logs": "IP Logs",
-        "apikey_fun": "Transit Station",
         "logout": "Logout",
         "more": "More",
         "mini_view": "Mini View"
@@ -523,7 +523,7 @@
             "auto_launch": "تشغيل عند البدء",
             "auto_launch_enabled": "مفعل",
             "auto_launch_disabled": "معطل",
-            "auto_launch_desc": "تشغيل Antigravity Tools تلقائيًا عند بدء النظام",
+            "auto_launch_desc": "تشغيل DeepGeminiProxy تلقائيًا عند بدء النظام",
             "quiet_autostart": "بدء هادئ (البقاء في الشريط)",
             "quiet_autostart_desc": "عند التشغيل مع النظام تبقى النافذة الرئيسية مخفية. إذا كان الوضع الخفيف مفعلاً أيضاً يُحرَّر WebView فوراً. فتح التطبيق يدوياً يُظهر النافذة. إذا لم يتوفر شريط النظام تُعرض النافذة.",
             "quiet_autostart_enabled": "تم تفعيل البدء الهادئ",
@@ -883,6 +883,15 @@
             "allow_lan_access_restart_hint": "ℹ️ مطلوب إعادة تشغيل الخدمة لتطبيق التغييرات",
             "api_key": "مفتاح API",
             "api_key_tooltip": "سر مشترك يستخدمه العملاء عند تمكين مصادقة الوكيل. إعادة توليد المفتاح تبطل القديم فورًا.",
+            "model_base_url": {
+                "label": "عنوان Base URL للنموذج",
+                "protocol": "بروتوكول API",
+                "address_type": "نوع العنوان",
+                "local": "محلي",
+                "lan": "الشبكة المحلية",
+                "lan_unavailable": "لم يُكتشف عنوان للشبكة المحلية",
+                "lan_hint": "للاتصال من جهاز آخر، فعّل الوصول من الشبكة المحلية وأعد تشغيل الخدمة."
+            },
             "btn_regenerate": "إعادة توليد المفتاح",
             "btn_edit": "تعديل",
             "btn_save": "حفظ",
@@ -2209,49 +2218,6 @@
         "records_unit": "سجلات",
         "no_trend_data": "لا توجد بيانات اتجاه في هذه الفترة",
         "no_model_data": "لا توجد بيانات للنماذج"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN Hub",
-        "eyebrow": "Hub",
-        "description": "The official Antigravity Tools API Hub, providing stable, open, and cost-effective large model API services. Supports mainstream models like Claude, OpenAI, and Gemini. Ideal for unified configuration in Codex, Gemini CLI, Claude Code, and other development tools.",
-        "viewNow": "View Now",
-        "usage": {
-            "remainingAmount": "Remaining",
-            "usedAmount": "Used",
-            "todayRequests": "Today's Requests",
-            "todayTokens": "Today's Tokens",
-            "totalRequests": "Total Requests",
-            "totalTokens": "Total Tokens"
-        },
-        "keyManager": {
-            "title": "Key Management",
-            "desc": "Save frequently used API Keys. Click to switch and query balance automatically.",
-            "lastRemainingLabel": "Last Balance",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Not queried",
-            "addedAt": "Added at",
-            "empty": "No saved keys."
-        },
-        "queryTitle": "Key Quota Query",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Paste your API Key...",
-        "queryButton": "Refresh",
-        "cli": {
-            "quickConfig": "One-Click Local Dev Setup",
-            "syncDesc": "Sync to official standard configuration",
-            "codexTooltip": "Sync API Key & BaseURL to Antigravity Codex",
-            "claudeTooltip": "Sync API Key & BaseURL to Claude Code",
-            "opencodeTooltip": "Sync API Key, BaseURL and models to OpenCode"
-        },
-        "models": {
-            "title": "Available Models",
-            "empty": "No models returned for current API Key."
-        },
-        "errors": {
-            "parseFormat": "Parse format error: {{err}}",
-            "fetchFailed": "Fetch failed: {{err}}",
-            "queryFailed": "Failed to get valid quota or models. Please check if the API Key and Base URL are correct."
-        }
     },
     "suggestion_delete_thinking": {
         "title": "توصية التحديث",

@@ -1,8 +1,13 @@
 # 📝 更新日志 (Changelog)
 
-> 完整版本历史记录。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
+> DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.0 (DeepGeminiProxy 首个独立版本)**:
+        -   DeepGeminiProxy 从 `1.0.0` 独立编号，并从本项目的 GitHub Releases 检查更新。旧版本记录保留用于上游溯源。
+        -   新增独立的 Agent 工具页面，集中管理客户端同步，支持在 macOS 上接入 DeepWrite。
+        -   GitHub Actions 为 macOS、Windows 和 Linux 构建安装包，并随 Release 提供 SHA-256 校验文件。
+        -   保留上游对象联合类型合并修复（[PR #3878](https://github.com/lbjlaq/Antigravity-Manager/pull/3878)，Thanks to @snailb1007）。
     *   **v5.0.3 (2026-11-06)**:
         -   **[配额归因治理：根治 503 污染与配额假死，重构大桶调度与优先级竞争] (Fixes #3838, #3841, #3821, PR #3845, Ref #3827, #3840)**:
             -   **根除 503 归因污染（占全量 5xx 的 92.6%）**: 网关内部限流判据统一收敛至 `policy::is_internal_gateway_exhaustion` 单一权威源，补全此前漏判的 `All accounts rate-limited`（旧列表只写 `all accounts limited`），本地号池限流不再被误报为上游 503；同步收敛 `rate_limit.rs` 与 `token_manager.rs` 中另两处漂移实现。(Fixes #3838)

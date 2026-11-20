@@ -14,6 +14,7 @@ pub mod cache_profile; // 签名缓存环境自适应预设
 pub mod cli_sync; // CLI 配置同步 (v3.3.35)
 pub mod common; // 公共工具
 pub mod debug_logger;
+pub mod deepwrite_sync;
 pub mod droid_sync; // Droid (Factory CLI) 配置同步
 pub mod handlers; // API 端点处理器
 pub mod hermes_sync; // Hermes Agent 配置同步

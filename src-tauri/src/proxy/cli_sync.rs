@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use yaml_rt::{JsonPointer, NodeId, SemanticKind, YamlDoc, YamlFragment};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -350,7 +351,10 @@ impl CliApp {
                 }]
             }
             CliApp::DeepSeekHarness => {
-                let dsh_dir = home.join(".dsh");
+                let dsh_dir = std::env::var_os("DSH_HOME")
+                    .filter(|path| !path.is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| home.join(".dsh"));
                 vec![
                     CliConfigFile {
                         name: "profiles/desktop/cordis.patch.yml".to_string(),
@@ -390,6 +394,7 @@ impl CliApp {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CliStatus {
+    pub integration_enabled: bool,
     pub installed: bool,
     pub version: Option<String>,
     pub is_synced: bool,
@@ -625,9 +630,7 @@ pub fn get_sync_status(
 
     for file in &files {
         // 使用更简单的命名规则: original_name + .antigravity.bak
-        let backup_path = file
-            .path
-            .with_file_name(format!("{}.antigravity.bak", file.name));
+        let backup_path = backup_path(&file.path, ".antigravity.bak");
 
         if backup_path.exists() {
             has_backup = true;
@@ -661,6 +664,7 @@ pub fn get_sync_status(
             CliApp::Claude => {
                 if file.name == "settings.json" {
                     let json: Value = serde_json::from_str(&content).unwrap_or_default();
+                    current_model = json.get("model").and_then(Value::as_str).map(str::to_owned);
                     let url = json
                         .get("env")
                         .and_then(|e| e.get("ANTHROPIC_BASE_URL"))
@@ -682,11 +686,21 @@ pub fn get_sync_status(
             }
             CliApp::Codex => {
                 if file.name == "config.toml" {
-                    // 正则匹配 base_url
-                    let re =
-                        regex::Regex::new(r#"(?m)^\s*base_url\s*=\s*['"]([^'"]+)['"]"#).unwrap();
-                    if let Some(caps) = re.captures(&content) {
-                        let url = &caps[1];
+                    let doc = content.parse::<toml_edit::DocumentMut>().ok();
+                    let table = doc.as_ref().map(|doc| doc.as_table());
+                    current_model = table
+                        .and_then(|table| table.get("model"))
+                        .and_then(|item| item.as_str())
+                        .map(str::to_owned);
+                    let provider = table
+                        .and_then(|table| table.get("model_provider"))
+                        .and_then(|item| item.as_str());
+                    let url = table
+                        .and_then(|table| table.get("model_providers"))
+                        .and_then(|providers| providers.get(provider?))
+                        .and_then(|provider| provider.get("base_url"))
+                        .and_then(|url| url.as_str());
+                    if let Some(url) = url {
                         current_base_url = Some(url.to_string());
                         if url.trim_end_matches('/') != proxy_url.trim_end_matches('/') {
                             all_synced = false;
@@ -825,34 +839,23 @@ pub fn get_sync_status(
             }
             CliApp::GrokBuild => {
                 if file.name == "config.toml" {
-                    use toml_edit::DocumentMut;
-                    if let Ok(doc) = content.parse::<DocumentMut>() {
-                        let normalized_proxy = proxy_url
-                            .trim_end_matches('/')
-                            .trim_end_matches("/v1")
-                            .trim_end_matches('/');
-
-                        let mut matched = false;
-                        if let Some(models) = doc.get("model").and_then(|i| i.as_table()) {
-                            for (_, m_item) in models.iter() {
-                                if let Some(b_url) = m_item.get("base_url").and_then(|v| v.as_str())
-                                {
-                                    current_base_url = Some(b_url.to_string());
-                                    let norm = b_url
-                                        .trim_end_matches('/')
-                                        .trim_end_matches("/v1")
-                                        .trim_end_matches('/');
-                                    if norm == normalized_proxy {
-                                        matched = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        if !matched {
-                            all_synced = false;
-                        }
+                    if let Ok(doc) = content.parse::<toml_edit::DocumentMut>() {
+                        let model = doc
+                            .get("models")
+                            .and_then(|models| models.get("default"))
+                            .and_then(|model| model.as_str());
+                        let url = doc
+                            .get("model")
+                            .and_then(|models| models.get(model?))
+                            .and_then(|model| model.get("base_url"))
+                            .and_then(|url| url.as_str());
+                        let normalize = |url: &str| {
+                            url.trim_end_matches('/').trim_end_matches("/v1")
+                                == proxy_url.trim_end_matches('/').trim_end_matches("/v1")
+                        };
+                        current_model = model.map(str::to_owned);
+                        current_base_url = url.map(str::to_owned);
+                        all_synced &= url.is_some_and(normalize);
                     } else {
                         all_synced = false;
                     }
@@ -860,53 +863,18 @@ pub fn get_sync_status(
             }
             CliApp::DeepSeekHarness => {
                 if file.name.ends_with("cordis.patch.yml") {
-                    let normalized_proxy = proxy_url
-                        .trim_end_matches('/')
-                        .trim_end_matches("/v1")
-                        .trim_end_matches('/');
-
-                    let has_ag_provider = content.contains("provider: antigravity")
-                        || content.contains("antigravity:");
-
-                    let mut matched = false;
-                    let re_url =
-                        regex::Regex::new(r#"(?m)^\s*baseURL:\s*['"]?([^'"\s#]+)['"]?"#).ok();
-                    if let Some(re) = re_url {
-                        for cap in re.captures_iter(&content) {
-                            if let Some(m) = cap.get(1) {
-                                let found_url = m.as_str();
-                                let norm_found = found_url
-                                    .trim_end_matches('/')
-                                    .trim_end_matches("/v1")
-                                    .trim_end_matches('/');
-                                if norm_found == normalized_proxy {
-                                    current_base_url = Some(found_url.to_string());
-                                    matched = true;
-                                    break;
-                                } else if current_base_url.is_none() {
-                                    current_base_url = Some(found_url.to_string());
-                                }
-                            }
-                        }
-                    }
-
-                    if current_model.is_none() {
-                        let re_model = regex::Regex::new(
-                            r#"(?s)id:\s*agent-default-model[\s\S]*?config:[\s\S]*?model:\s*['"]?([a-zA-Z0-9_.-]+)['"]?"#,
-                        )
-                        .ok();
-                        if let Some(re) = re_model {
-                            if let Some(cap) = re.captures(&content) {
-                                if let Some(m) = cap.get(1) {
-                                    current_model = Some(m.as_str().to_string());
-                                }
-                            }
-                        }
-                    }
-
-                    if !matched || !has_ag_provider {
-                        all_synced = false;
-                    }
+                    let (url, model) = dsh_patch_status(&content);
+                    all_synced &= url.as_deref().is_some_and(|url| {
+                        url.trim_end_matches('/').trim_end_matches("/v1")
+                            == proxy_url.trim_end_matches('/').trim_end_matches("/v1")
+                    });
+                    current_base_url = current_base_url.or(url);
+                    current_model = current_model.or(model);
+                } else if file.name == ".credentials.yaml" {
+                    all_synced &= YamlDoc::parse(&content).is_ok_and(|doc| {
+                        dsh_value(&doc, "/refs/ANTIGRAVITY_API_KEY")
+                            .is_some_and(|key| !key.trim().is_empty())
+                    });
                 }
             }
         }
@@ -944,6 +912,15 @@ pub fn sync_agy_binary_wrapper(
     api_key: &str,
     model: Option<&str>,
 ) -> Result<(), String> {
+    sync_agy_binary_wrapper_inner(proxy_url, api_key, model, false)
+}
+
+fn sync_agy_binary_wrapper_inner(
+    proxy_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+    integration: bool,
+) -> Result<(), String> {
     let home = match dirs::home_dir() {
         Some(h) => h,
         None => return Ok(()),
@@ -963,11 +940,20 @@ pub fn sync_agy_binary_wrapper(
         _ => "gemini-3.8-flash-high",
     };
 
+    if integration && !can_wrap_agy(&agy_path, &agy_cli_path) {
+        return Ok(());
+    }
+
     // 隔离历史 Google OAuth token，彻底阻断打向 daily-cloudcode-pa.googleapis.com
     let token_file = home.join(".gemini/antigravity-cli/antigravity-oauth-token");
     if token_file.exists() {
         let bak = home.join(".gemini/antigravity-cli/antigravity-oauth-token.antigravity.bak");
-        let _ = fs::rename(&token_file, &bak);
+        if integration {
+            fs::rename(&token_file, &bak)
+                .map_err(|error| format!("Failed to back up agy OAuth token: {error}"))?;
+        } else {
+            let _ = fs::rename(&token_file, &bak);
+        }
     }
 
     let wrapper_content = format!(
@@ -1013,6 +999,16 @@ pub fn sync_agy_binary_wrapper(
          done\n",
         api_key, proxy_url, target_model, target_model
     );
+
+    #[cfg(unix)]
+    if integration {
+        if !agy_cli_path.exists() {
+            fs::rename(&agy_path, &agy_cli_path)
+                .map_err(|error| format!("Failed to back up agy launcher: {error}"))?;
+        }
+        write_agent_config(&agy_path, wrapper_content.as_bytes(), 0o700)?;
+        return Ok(());
+    }
 
     // 情况 1: 如果已经存在 agy_cli（已经被包装过）
     if agy_cli_path.exists() {
@@ -1101,9 +1097,18 @@ pub fn sync_config(
     api_key: &str,
     model: Option<&str>,
 ) -> Result<(), String> {
-    let files = app.config_files();
+    sync_config_files(app, proxy_url, api_key, model, &app.config_files(), false)
+}
 
-    for file in &files {
+fn sync_config_files(
+    app: &CliApp,
+    proxy_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+    files: &[CliConfigFile],
+    integration: bool,
+) -> Result<(), String> {
+    for file in files {
         // Gemini 兼容性逻辑：优先使用 settings.json
         if app == &CliApp::Gemini && file.name == "config.json" && !file.path.exists() {
             let settings_path = file.path.with_file_name("settings.json");
@@ -1118,10 +1123,8 @@ pub fn sync_config(
 
         // [New Feature] 自动备份：如果文件存在且没有备份，创建 .antigravity.bak 备份
         // 这样可以保留用户最初的配置，后续多次同步不会覆盖这个备份
-        if file.path.exists() {
-            let backup_path = file
-                .path
-                .with_file_name(format!("{}.antigravity.bak", file.name));
+        if !integration && file.path.exists() {
+            let backup_path = backup_path(&file.path, ".antigravity.bak");
             if !backup_path.exists() {
                 if let Err(e) = fs::copy(&file.path, &backup_path) {
                     tracing::warn!("Failed to create backup for {}: {}", file.name, e);
@@ -1131,7 +1134,9 @@ pub fn sync_config(
             }
         }
 
-        let mut content = if file.path.exists() {
+        let mut content = if integration {
+            read_integration_config(file)?
+        } else if file.path.exists() {
             fs::read_to_string(&file.path).unwrap_or_default()
         } else {
             String::new()
@@ -1163,29 +1168,12 @@ pub fn sync_config(
                             Value::String(proxy_url.to_string()),
                         );
                         if !api_key.is_empty() {
-                            if proxy_url.contains("apikey.fun") || proxy_url.contains("apikey.fan")
-                            {
-                                env_obj.insert(
-                                    "ANTHROPIC_AUTH_TOKEN".to_string(),
-                                    Value::String(api_key.to_string()),
-                                );
-                                env_obj.insert(
-                                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".to_string(),
-                                    Value::String("1".to_string()),
-                                );
-                                env_obj.insert(
-                                    "CLAUDE_CODE_ATTRIBUTION_HEADER".to_string(),
-                                    Value::String("0".to_string()),
-                                );
-                                env_obj.remove("ANTHROPIC_API_KEY");
-                            } else {
-                                env_obj.insert(
-                                    "ANTHROPIC_API_KEY".to_string(),
-                                    Value::String(api_key.to_string()),
-                                );
-                                // [FIX] 避免冲突：如果存在则移除 ANTHROPIC_AUTH_TOKEN
-                                env_obj.remove("ANTHROPIC_AUTH_TOKEN");
-                            }
+                            env_obj.insert(
+                                "ANTHROPIC_API_KEY".to_string(),
+                                Value::String(api_key.to_string()),
+                            );
+                            // [FIX] 避免冲突：如果存在则移除 ANTHROPIC_AUTH_TOKEN
+                            env_obj.remove("ANTHROPIC_AUTH_TOKEN");
 
                             // [FIX] 清理可能来自其他 Provider 的模型覆盖设置
                             env_obj.remove("ANTHROPIC_MODEL");
@@ -1217,15 +1205,11 @@ pub fn sync_config(
                             "OPENAI_API_KEY".to_string(),
                             Value::String(api_key.to_string()),
                         );
-                        if proxy_url.contains("apikey.fun") || proxy_url.contains("apikey.fan") {
-                            obj.remove("OPENAI_BASE_URL");
-                        } else {
-                            // Codex 的 auth.json 似乎也支持 OPENAI_BASE_URL，但 ccs 没写，我们也同步写一下
-                            obj.insert(
-                                "OPENAI_BASE_URL".to_string(),
-                                Value::String(proxy_url.to_string()),
-                            );
-                        }
+                        // Codex 的 auth.json 似乎也支持 OPENAI_BASE_URL，但 ccs 没写，我们也同步写一下
+                        obj.insert(
+                            "OPENAI_BASE_URL".to_string(),
+                            Value::String(proxy_url.to_string()),
+                        );
                     }
                     content = serde_json::to_string_pretty(&json).unwrap();
                 } else if file.name == "config.toml" {
@@ -1236,40 +1220,20 @@ pub fn sync_config(
 
                     // 必须使用 custom 提供商，Codex 不支持原生的 codex provider
                     let provider_key = "custom";
-                    let is_apikey_fun =
-                        proxy_url.contains("apikey.fun") || proxy_url.contains("apikey.fan");
-                    let display_name = if is_apikey_fun {
-                        "APIKEY.FUN"
-                    } else {
-                        "Custom Node"
-                    };
-
                     // 优先设置 Root Keys 确保位于顶部
                     doc.insert("model_provider", value(provider_key));
 
-                    if is_apikey_fun {
-                        doc.insert("model", value("gpt-5.5"));
-                        doc.insert("review_model", value("gpt-5.5"));
-                        doc.insert("model_reasoning_effort", value("high"));
-                        doc.insert("disable_response_storage", value(true));
-                        doc.insert("network_access", value("enabled"));
-                        doc.insert("windows_wsl_setup_acknowledged", value(true));
-                        doc.insert("model_context_window", value(270000));
-                        doc.insert("model_auto_compact_token_limit", value(270000));
-                        doc.insert("effective_context_window_percent", value(95));
-                    } else {
-                        if let Some(m) = model {
-                            doc.insert("model", value(m));
-                            let cw = if m.contains("gemini") {
-                                1_024_000
-                            } else if m.contains("claude") {
-                                256_000
-                            } else {
-                                128_000
-                            };
-                            doc.insert("model_context_window", value(cw));
-                            doc.insert("model_auto_compact_token_limit", value(cw));
-                        }
+                    if let Some(m) = model {
+                        doc.insert("model", value(m));
+                        let cw = if m.contains("gemini") {
+                            1_024_000
+                        } else if m.contains("claude") {
+                            256_000
+                        } else {
+                            128_000
+                        };
+                        doc.insert("model_context_window", value(cw));
+                        doc.insert("model_auto_compact_token_limit", value(cw));
                     }
 
                     // 移除可能的根级别旧配置
@@ -1285,7 +1249,7 @@ pub fn sync_config(
                             .entry(provider_key)
                             .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
                         if let Some(c_table) = custom.as_table_mut() {
-                            c_table.insert("name", value(display_name));
+                            c_table.insert("name", value("Custom Node"));
                             c_table.insert("wire_api", value("responses"));
                             c_table.insert("requires_openai_auth", value(true));
                             c_table.insert("base_url", value(proxy_url.to_string()));
@@ -1295,14 +1259,6 @@ pub fn sync_config(
                         }
                     }
 
-                    if is_apikey_fun {
-                        let features = doc
-                            .entry("features")
-                            .or_insert(toml_edit::Item::Table(toml_edit::Table::new()));
-                        if let Some(f_table) = features.as_table_mut() {
-                            f_table.insert("goals", value(true));
-                        }
-                    }
                     content = doc.to_string();
                 }
             }
@@ -1480,12 +1436,20 @@ pub fn sync_config(
                         }
                     };
 
-                    let core_models = get_core_gateway_models();
-
                     let default_model_id = match model {
                         Some(m) if !m.is_empty() => m,
                         _ => "gemini-3.8-flash-high",
                     };
+                    let mut gateway_models: Vec<_> = get_core_gateway_models()
+                        .into_iter()
+                        .map(|model| (model.id, model.context_window))
+                        .collect();
+                    if integration && !gateway_models.iter().any(|(id, _)| *id == default_model_id)
+                    {
+                        let (window, _, _, _) =
+                            super::openclaw_sync::resolve_model_specs(default_model_id);
+                        gateway_models.push((default_model_id, window as i64));
+                    }
 
                     // 1. 设置 [models] default 为真实选定的网关模型
                     let models_sec = doc.entry("models").or_insert(Item::Table(Table::new()));
@@ -1496,14 +1460,14 @@ pub fn sync_config(
                     // 2. 注入所有网关真实模型到 [model."<id>"]
                     let model_sec = doc.entry("model").or_insert(Item::Table(Table::new()));
                     if let Some(m_table) = model_sec.as_table_mut() {
-                        for m in core_models {
-                            let entry = m_table.entry(m.id).or_insert(Item::Table(Table::new()));
+                        for (id, context_window) in gateway_models {
+                            let entry = m_table.entry(id).or_insert(Item::Table(Table::new()));
                             if let Some(t) = entry.as_table_mut() {
-                                t.insert("model", value(m.id));
+                                t.insert("model", value(id));
                                 t.insert("base_url", value(&normalized_proxy_url));
-                                t.insert("name", value(m.id));
+                                t.insert("name", value(id));
                                 t.insert("api_backend", value("responses"));
-                                t.insert("context_window", value(m.context_window));
+                                t.insert("context_window", value(context_window));
                                 t.insert("image_input", value(true));
                                 if !api_key.is_empty() {
                                     t.insert("api_key", value(api_key));
@@ -1533,11 +1497,21 @@ pub fn sync_config(
                         &content,
                         &normalized_proxy_url,
                         target_model,
-                    );
+                    )?;
                 } else if file.name == ".credentials.yaml" {
-                    content = sync_dsh_credentials_content(&content, api_key);
+                    content = sync_dsh_credentials_content(&content, api_key)?;
                 }
             }
+        }
+
+        if integration {
+            let mode = if file.name.ends_with(".sh") {
+                0o700
+            } else {
+                0o600
+            };
+            write_agent_config(&file.path, content.as_bytes(), mode)?;
+            continue;
         }
 
         // 使用临时文件原子写入
@@ -1557,10 +1531,283 @@ pub fn sync_config(
     }
 
     if app == &CliApp::Gemini {
-        let _ = sync_agy_binary_wrapper(proxy_url, api_key, model);
+        if integration {
+            #[cfg(unix)]
+            sync_agy_binary_wrapper_inner(proxy_url, api_key, model, true)?;
+        } else {
+            let _ = sync_agy_binary_wrapper(proxy_url, api_key, model);
+        }
     }
 
     Ok(())
+}
+
+const INTEGRATION_BACKUP: &str = ".antigravity-agent.bak";
+const INTEGRATION_CREATED: &str = ".antigravity-agent.created";
+static CLI_INTEGRATION_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn backup_path(path: &Path, suffix: &str) -> PathBuf {
+    let mut name = path.file_name().unwrap_or_default().to_os_string();
+    name.push(suffix);
+    path.with_file_name(name)
+}
+
+fn has_integration_backup(path: &Path) -> bool {
+    backup_path(path, INTEGRATION_BACKUP).exists()
+        || backup_path(path, INTEGRATION_CREATED).exists()
+}
+
+fn can_wrap_agy(launcher: &Path, binary: &Path) -> bool {
+    use std::io::Read;
+
+    if launcher.is_symlink() || binary.is_symlink() {
+        return false;
+    }
+    if binary.is_file() {
+        if !launcher.exists() {
+            return true;
+        }
+        let mut header = [0; 128];
+        return fs::File::open(launcher)
+            .and_then(|mut file| file.read(&mut header))
+            .is_ok_and(|len| {
+                header[..len]
+                    .windows(b"Generated by Antigravity-Manager".len())
+                    .any(|bytes| bytes == b"Generated by Antigravity-Manager")
+            });
+    }
+    let mut header = [0; 2];
+    fs::File::open(launcher)
+        .and_then(|mut file| file.read_exact(&mut header))
+        .is_ok_and(|_| &header != b"#!")
+}
+
+fn integration_paths(app: &CliApp, files: &[CliConfigFile]) -> Vec<PathBuf> {
+    let mut paths: Vec<_> = files.iter().map(|file| file.path.clone()).collect();
+    #[cfg(unix)]
+    if app == &CliApp::Gemini {
+        if let Some(home) = dirs::home_dir() {
+            let agy = home.join(".local/bin/agy");
+            let agy_cli = home.join(".local/bin/agy_cli");
+            if can_wrap_agy(&agy, &agy_cli)
+                || has_integration_backup(&agy)
+                || has_integration_backup(&agy_cli)
+            {
+                paths.extend([agy, agy_cli]);
+                let token = home.join(".gemini/antigravity-cli/antigravity-oauth-token");
+                paths.extend([backup_path(&token, ".antigravity.bak"), token]);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = app;
+    paths
+}
+
+pub(super) fn write_agent_config(path: &Path, bytes: &[u8], mode: u32) -> Result<(), String> {
+    use std::io::Write;
+
+    let temporary = backup_path(path, &format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+
+    let result = options.open(&temporary).and_then(|mut file| {
+        file.write_all(bytes)?;
+        drop(file);
+        fs::rename(&temporary, path)
+    });
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.map_err(|error| format!("Failed to write {}: {error}", path.display()))
+}
+
+fn read_integration_config(file: &CliConfigFile) -> Result<String, String> {
+    let content = match fs::read_to_string(&file.path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(error) => return Err(format!("Failed to read {}: {error}", file.path.display())),
+    };
+
+    if !content.trim().is_empty() {
+        let valid = if file.name.ends_with(".json") {
+            serde_json::from_str::<Value>(&content).is_ok_and(|value| value.is_object())
+        } else if file.name.ends_with(".toml") {
+            content.parse::<toml_edit::DocumentMut>().is_ok()
+        } else {
+            true
+        };
+        if !valid {
+            return Err(format!("Invalid config at {}", file.path.display()));
+        }
+    }
+    Ok(content)
+}
+
+fn save_integration_backup(path: &Path) -> Result<Option<PathBuf>, String> {
+    if has_integration_backup(path) {
+        return Ok(None);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Failed to create config directory: {error}"))?;
+    }
+    if path.is_symlink() {
+        return Err(format!(
+            "Cannot replace a symbolic link at {}",
+            path.display()
+        ));
+    }
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {
+            let backup = backup_path(path, INTEGRATION_BACKUP);
+            // The config writer replaces files atomically. A hard link keeps the baseline
+            // and its permissions without copying an Antigravity CLI executable.
+            if fs::hard_link(path, &backup).is_err() {
+                let temporary = backup_path(&backup, &format!(".{}.tmp", uuid::Uuid::new_v4()));
+                let result =
+                    fs::copy(path, &temporary).and_then(|_| fs::rename(&temporary, &backup));
+                if let Err(error) = result {
+                    let _ = fs::remove_file(temporary);
+                    return Err(format!("Failed to back up {}: {error}", path.display()));
+                }
+            }
+            Ok(Some(backup))
+        }
+        Ok(_) => Err(format!("Expected a config file at {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let marker = backup_path(path, INTEGRATION_CREATED);
+            write_agent_config(&marker, &[], 0o600)?;
+            Ok(Some(marker))
+        }
+        Err(error) => Err(format!("Failed to back up {}: {error}", path.display())),
+    }
+}
+
+fn restore_integration_path(path: &Path) -> Result<(), String> {
+    let backup = backup_path(path, INTEGRATION_BACKUP);
+    let marker = backup_path(path, INTEGRATION_CREATED);
+    if backup.exists() {
+        fs::rename(&backup, path)
+            .map_err(|error| format!("Failed to restore {}: {error}", path.display()))?;
+        // Renaming one hard link over another link to the same file is a no-op.
+        if backup.exists() {
+            fs::remove_file(backup).map_err(|error| format!("Failed to remove backup: {error}"))?;
+        }
+    } else if marker.exists() {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("Failed to remove {}: {error}", path.display())),
+        }
+        fs::remove_file(marker)
+            .map_err(|error| format!("Failed to remove backup marker: {error}"))?;
+    }
+    Ok(())
+}
+
+fn enable_cli_integration(
+    app: &CliApp,
+    proxy_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+) -> Result<(), String> {
+    if proxy_url.trim().is_empty() || api_key.trim().is_empty() {
+        return Err("A gateway URL and API key are required".to_string());
+    }
+
+    let mut files = app.config_files();
+    if app == &CliApp::Gemini {
+        // These values also appear in dotenv and generated shell and batch scripts.
+        if [Some(proxy_url), Some(api_key), model]
+            .into_iter()
+            .flatten()
+            .any(|value| value.contains(['\r', '\n', '"', '\'', '$', '`', '\\', '%', '!']))
+        {
+            return Err(
+                "The Antigravity CLI configuration contains unsupported script characters"
+                    .to_string(),
+            );
+        }
+        // settings.json is created by the same operation.
+        files.retain(|file| file.name != "config.json" || file.path.exists());
+    }
+    if files.is_empty() {
+        return Err("No configuration directory found".to_string());
+    }
+
+    let mut backups = Vec::new();
+    for path in integration_paths(app, &files) {
+        match save_integration_backup(&path) {
+            Ok(Some(backup)) => backups.push((path, backup)),
+            Ok(None) => {}
+            Err(error) => {
+                for (_, backup) in backups {
+                    let _ = fs::remove_file(backup);
+                }
+                return Err(error);
+            }
+        }
+    }
+
+    let result = sync_config_files(app, proxy_url, api_key, model, &files, true).and_then(|_| {
+        if get_sync_status(app, proxy_url).0 {
+            Ok(())
+        } else {
+            Err("The Agent configuration could not be verified after writing".to_string())
+        }
+    });
+    if let Err(error) = result {
+        let mut errors = vec![error];
+        for (path, _) in backups {
+            if let Err(error) = restore_integration_path(&path) {
+                errors.push(error);
+            }
+        }
+        return Err(errors.join(". "));
+    }
+    Ok(())
+}
+
+fn restore_cli_config(app: &CliApp) -> Result<(), String> {
+    let files = app.config_files();
+    let paths = integration_paths(app, &files);
+    if paths.iter().any(|path| has_integration_backup(path)) {
+        let errors: Vec<_> = paths
+            .iter()
+            .filter_map(|path| restore_integration_path(path).err())
+            .collect();
+        return if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join(". "))
+        };
+    }
+
+    if app == &CliApp::Gemini {
+        restore_agy_binary_wrapper()?;
+    }
+    let mut restored = false;
+    for file in &files {
+        let backup = backup_path(&file.path, ".antigravity.bak");
+        if backup.exists() {
+            fs::rename(backup, &file.path)
+                .map_err(|error| format!("Failed to restore {}: {error}", file.path.display()))?;
+            restored = true;
+        }
+    }
+    if restored {
+        Ok(())
+    } else {
+        sync_config(app, app.default_url(), "", None)
+    }
 }
 
 // Tauri Commands
@@ -1575,7 +1822,11 @@ pub async fn get_cli_sync_status(app_type: CliApp, proxy_url: String) -> Result<
             (false, false, None, None)
         };
 
+        let integration_enabled = integration_paths(&app_type, &app_type.config_files())
+            .iter()
+            .any(|path| has_integration_backup(path));
         Ok(CliStatus {
+            integration_enabled,
             installed,
             version,
             is_synced,
@@ -1599,9 +1850,17 @@ pub async fn execute_cli_sync(
     proxy_url: String,
     api_key: String,
     model: Option<String>,
+    integration: Option<bool>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        sync_config(&app_type, &proxy_url, &api_key, model.as_deref())
+        let _lock = CLI_INTEGRATION_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if integration.unwrap_or(false) {
+            enable_cli_integration(&app_type, &proxy_url, &api_key, model.as_deref())
+        } else {
+            sync_config(&app_type, &proxy_url, &api_key, model.as_deref())
+        }
     })
     .await
     .unwrap_or_else(|_| Err("Task panicked".to_string()))
@@ -1610,36 +1869,10 @@ pub async fn execute_cli_sync(
 #[tauri::command]
 pub async fn execute_cli_restore(app_type: CliApp) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
-        let files = app_type.config_files();
-        let mut restored_count = 0;
-
-        if app_type == CliApp::Gemini {
-            let _ = restore_agy_binary_wrapper();
-        }
-
-        // 尝试从备份恢复
-        for file in &files {
-            let backup_path = file
-                .path
-                .with_file_name(format!("{}.antigravity.bak", file.name));
-            if backup_path.exists() {
-                // 还原：覆盖原文件
-                if let Err(e) = fs::rename(&backup_path, &file.path) {
-                    return Err(format!("恢复备份失败 {}: {}", file.name, e));
-                }
-                restored_count += 1;
-            }
-        }
-
-        if restored_count > 0 {
-            // 如果成功恢复了至少一个备份，就认为是恢复成功
-            return Ok(());
-        }
-
-        // 如果没有备份，则执行原来的逻辑：恢复为默认配置
-        let default_url = app_type.default_url();
-        // 恢复默认时清空 API Key，让用户重新授权或使用官方 Key
-        sync_config(&app_type, default_url, "", None)
+        let _lock = CLI_INTEGRATION_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        restore_cli_config(&app_type)
     })
     .await
     .unwrap_or_else(|_| Err("Task panicked".to_string()))
@@ -2041,300 +2274,197 @@ pub fn sync_jeikcode_toml_content(
 }
 
 /// 同步 DeepSeek Harness 的 .credentials.yaml 密钥文件
-fn sync_dsh_credentials_content(content: &str, api_key: &str) -> String {
-    if content.trim().is_empty() {
-        return format!("version: 1\nrefs:\n  ANTIGRAVITY_API_KEY: {}\n", api_key);
-    }
-
-    let re_key = regex::Regex::new(r#"(?m)^(\s*ANTIGRAVITY_API_KEY:\s*).*$"#).unwrap();
-    if re_key.is_match(content) {
-        return re_key
-            .replace(content, regex::NoExpand(&format!("${{1}}{}", api_key)))
-            .to_string();
-    }
-
-    let re_inline_refs = regex::Regex::new(r#"(?s)(refs:\s*\{[\s\S]*?)(\})"#).unwrap();
-    if let Some(caps) = re_inline_refs.captures(content) {
-        let p1 = caps.get(1).unwrap().as_str().trim_end();
-        let needs_comma = !p1.ends_with('{') && !p1.ends_with(',');
-        let comma = if needs_comma { "," } else { "" };
-        let replacement = format!(
-            "{}{}\n    ANTIGRAVITY_API_KEY: {}\n  }}",
-            p1, comma, api_key
-        );
-        return re_inline_refs
-            .replace(content, regex::NoExpand(&replacement))
-            .to_string();
-    }
-
-    let re_block_refs = regex::Regex::new(r#"(?m)^(refs:\s*)$"#).unwrap();
-    if re_block_refs.is_match(content) {
-        return re_block_refs
-            .replace(
-                content,
-                regex::NoExpand(&format!("refs:\n  ANTIGRAVITY_API_KEY: {}", api_key)),
-            )
-            .to_string();
-    }
-
-    format!(
-        "{}\nrefs:\n  ANTIGRAVITY_API_KEY: {}\n",
-        content.trim_end(),
-        api_key
-    )
+fn dsh_node(doc: &YamlDoc, path: &str) -> Option<NodeId> {
+    doc.resolve_pointer(0, &JsonPointer::parse(path).ok()?).ok()
 }
 
-fn build_dsh_models_yaml(selected_model: &str) -> String {
-    let core_models = get_core_gateway_models();
-    let mut out = String::new();
+fn dsh_value(doc: &YamlDoc, path: &str) -> Option<String> {
+    doc.scalar_value(dsh_node(doc, path)?)
+        .ok()
+        .map(|value| value.into_owned())
+}
 
-    if !core_models.iter().any(|m| m.id == selected_model) {
-        out.push_str(&format!(
-            "          - id: {}\n            name: {}\n            contextWindow: 1048576\n            input:\n              - text\n              - image\n            maxTokens: 128000\n",
-            selected_model, selected_model
-        ));
-    }
+fn dsh_set(doc: &mut YamlDoc, path: &str, source: &str) -> Result<(), String> {
+    let pointer = JsonPointer::parse(path).map_err(|error| error.to_string())?;
+    let fragment = YamlFragment::parse(source)
+        .map_err(|error| format!("Invalid DeepSeek Harness configuration fragment: {error}"))?;
+    let result = if doc.resolve_pointer(0, &pointer).is_ok() {
+        doc.replace_at(0, &pointer, &fragment)
+    } else {
+        doc.add_at(0, &pointer, &fragment)
+    };
+    result.map_err(|error| format!("Failed to edit DeepSeek Harness config at {path}: {error}"))?;
+    doc.commit_edits().map_err(|error| error.to_string())
+}
 
-    for m in core_models {
-        out.push_str(&format!(
-            "          - id: {}\n            name: {}\n            contextWindow: {}\n            input:\n              - text\n              - image\n            maxTokens: 128000\n",
-            m.id, m.id, m.context_window
-        ));
-        // [2026-10-29] 思考强度完全由官方模型目录提供：只写真实存在的档位后缀，
-        // 并提供 default（不指定 effort，由网关默认路由决定档位）。
-        let efforts = crate::proxy::model_specs::available_efforts_for(m.id);
-        if !efforts.is_empty() {
-            out.push_str("            reasoningEfforts:\n              off: null\n");
-            for effort in &efforts {
-                out.push_str(&format!("              {}: {}\n", effort, effort));
-            }
-            out.push_str("              default: null\n");
+fn dsh_ensure_mapping(doc: &mut YamlDoc, path: &str) -> Result<(), String> {
+    match dsh_node(doc, path).and_then(|node| doc.semantic_kind(node)) {
+        Some(SemanticKind::Mapping { .. }) => Ok(()),
+        None => dsh_set(doc, path, "{}"),
+        Some(SemanticKind::Scalar { .. })
+            if dsh_value(doc, path).is_some_and(|value| value.is_empty() || value == "null") =>
+        {
+            dsh_set(doc, path, "{}")
         }
+        _ => Err(format!(
+            "DeepSeek Harness configuration at {path} must be a mapping"
+        )),
     }
-    out
+}
+
+fn sync_dsh_credentials_content(content: &str, api_key: &str) -> Result<String, String> {
+    let source = if content.trim().is_empty() {
+        "version: 1\nrefs: {}\n"
+    } else {
+        content
+    };
+    let mut doc = YamlDoc::parse(source)
+        .map_err(|error| format!("Invalid DeepSeek Harness credentials file: {error}"))?;
+    dsh_ensure_mapping(&mut doc, "/refs")?;
+    dsh_set(
+        &mut doc,
+        "/refs/ANTIGRAVITY_API_KEY",
+        &Value::from(api_key).to_string(),
+    )?;
+    Ok(doc.as_source().to_owned())
 }
 
 fn build_dsh_provider_block(proxy_url: &str, selected_model: &str) -> String {
-    let models_yaml = build_dsh_models_yaml(selected_model);
-    format!(
-        "      antigravity:\n        displayName: antigravity\n        apiKeyEnv: ANTIGRAVITY_API_KEY\n        api: openai-completions\n        baseURL: {}\n        models:\n{}",
-        proxy_url, models_yaml
-    )
-}
+    use std::fmt::Write;
 
-struct DshPatchEntry {
-    id: String,
-    lines: Vec<String>,
-}
-
-fn parse_dsh_patch_entries(content: &str) -> (Vec<String>, Vec<DshPatchEntry>) {
-    let mut header = Vec::new();
-    let mut entries = Vec::new();
-    let mut current_id: Option<String> = None;
-    let mut current_lines: Vec<String> = Vec::new();
-    let mut in_header = true;
-
-    for line in content.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("- id:") {
-            in_header = false;
-            if let Some(id) = current_id.take() {
-                entries.push(DshPatchEntry {
-                    id,
-                    lines: current_lines.clone(),
-                });
-                current_lines.clear();
-            }
-            let id_val = trimmed["- id:".len()..]
-                .trim()
-                .trim_matches(|c| c == '\'' || c == '"');
-            current_id = Some(id_val.to_string());
-        }
-
-        if in_header {
-            header.push(line.to_string());
-        } else {
-            current_lines.push(line.to_string());
-        }
-    }
-
-    if let Some(id) = current_id {
-        entries.push(DshPatchEntry {
-            id,
-            lines: current_lines,
-        });
-    }
-
-    (header, entries)
-}
-
-/// 同步 DeepSeek Harness 的 cordis.patch.yml 配置（同时适用于 Desktop/CLI 与 Web GUI Profile）
-fn sync_dsh_cordis_patch_content(content: &str, proxy_url: &str, selected_model: &str) -> String {
-    let default_model_block = format!(
-        "- id: agent-default-model\n  name: \"@deepseek-ai/dsh-agent-default-model\"\n  config:\n    provider: antigravity\n    model: {}\n",
-        selected_model
+    let models = get_core_gateway_models();
+    let selected_extra = (!models.iter().any(|model| model.id == selected_model))
+        .then_some((selected_model, 1_048_576));
+    let models = selected_extra
+        .into_iter()
+        .chain(models.iter().map(|model| (model.id, model.context_window)));
+    let mut out = format!(
+        "displayName: Antigravity Manager\napiKeyEnv: ANTIGRAVITY_API_KEY\napi: openai-completions\nbaseURL: {}\nmodels:\n",
+        Value::from(proxy_url)
     );
-    let provider_block = build_dsh_provider_block(proxy_url, selected_model);
-
-    let trimmed = content.trim();
-    if trimmed.is_empty() || trimmed == "[]" || !trimmed.contains("- id:") {
-        let comment = "# Your patch layer for this dsh profile, applied after every bundle layer:\n# a top-level YAML array of loader patch entries (id-targeted config\n# overrides, disables, and insert lists; `!!js` expressions allowed).\n";
-        return format!(
-            "{}{}- id: llm-pi-ai\n  name: \"@deepseek-ai/dsh-llm-pi-ai\"\n  config:\n    providers:\n{}\n",
-            comment, default_model_block, provider_block
+    for (id, context_window) in models {
+        let _ = writeln!(
+            out,
+            "  - id: {id_yaml}\n    name: {id_yaml}\n    contextWindow: {context_window}\n    input: [text, image]\n    maxTokens: 128000",
+            id_yaml = Value::from(id),
         );
-    }
-
-    let (header, mut entries) = parse_dsh_patch_entries(content);
-
-    // 1. 更新或插入 agent-default-model
-    if let Some(entry) = entries.iter_mut().find(|e| e.id == "agent-default-model") {
-        let mut new_lines = Vec::new();
-        let mut has_config = false;
-        let mut has_provider = false;
-        let mut has_model = false;
-
-        for line in &entry.lines {
-            let t = line.trim();
-            if t.starts_with("config:") {
-                has_config = true;
-                new_lines.push(line.clone());
-            } else if t.starts_with("provider:") {
-                has_provider = true;
-                let indent = line.len() - line.trim_start().len();
-                new_lines.push(format!(
-                    "{:indent$}provider: antigravity",
-                    "",
-                    indent = indent
-                ));
-            } else if t.starts_with("model:") {
-                has_model = true;
-                let indent = line.len() - line.trim_start().len();
-                new_lines.push(format!(
-                    "{:indent$}model: {}",
-                    "",
-                    selected_model,
-                    indent = indent
-                ));
-            } else {
-                new_lines.push(line.clone());
+        let efforts = crate::proxy::model_specs::available_efforts_for(id);
+        if !efforts.is_empty() {
+            out.push_str("    reasoningEfforts:\n      off: null\n");
+            for effort in &efforts {
+                let level = if effort == "extra-low" {
+                    "minimal"
+                } else {
+                    effort
+                };
+                let _ = writeln!(out, "      {level}: {effort}");
             }
         }
-
-        if !has_config {
-            new_lines.push("  config:".to_string());
-        }
-        if !has_provider {
-            new_lines.push("    provider: antigravity".to_string());
-        }
-        if !has_model {
-            new_lines.push(format!("    model: {}", selected_model));
-        }
-
-        entry.lines = new_lines;
-    } else {
-        entries.insert(
-            0,
-            DshPatchEntry {
-                id: "agent-default-model".to_string(),
-                lines: default_model_block.lines().map(|s| s.to_string()).collect(),
-            },
-        );
     }
-
-    // 2. 更新或插入 llm-pi-ai
-    if let Some(entry) = entries.iter_mut().find(|e| e.id == "llm-pi-ai") {
-        let mut new_lines = Vec::new();
-        let mut in_providers = false;
-        let mut in_antigravity = false;
-        let mut provider_replaced = false;
-        let mut has_providers_header = false;
-
-        let provider_block_lines: Vec<String> =
-            provider_block.lines().map(|s| s.to_string()).collect();
-
-        for line in &entry.lines {
-            let trimmed = line.trim_start();
-            let indent = line.len() - trimmed.len();
-
-            if trimmed.starts_with("providers:") {
-                in_providers = true;
-                has_providers_header = true;
-                new_lines.push(line.clone());
-                continue;
-            }
-
-            if in_providers {
-                if indent == 6 && trimmed.ends_with(':') {
-                    if trimmed.starts_with("antigravity:") {
-                        in_antigravity = true;
-                        if !provider_replaced {
-                            new_lines.extend(provider_block_lines.clone());
-                            provider_replaced = true;
-                        }
-                        continue;
-                    } else {
-                        in_antigravity = false;
-                    }
-                } else if indent < 6 && !trimmed.is_empty() {
-                    in_providers = false;
-                    in_antigravity = false;
-                }
-
-                if in_antigravity {
-                    continue;
-                }
-            }
-
-            new_lines.push(line.clone());
-        }
-
-        if !has_providers_header {
-            if !new_lines.iter().any(|l| l.trim().starts_with("config:")) {
-                new_lines.push("  config:".to_string());
-            }
-            new_lines.push("    providers:".to_string());
-            new_lines.extend(provider_block_lines);
-        } else if !provider_replaced {
-            let mut final_lines = Vec::new();
-            for l in new_lines {
-                let is_prov = l.trim().starts_with("providers:");
-                final_lines.push(l);
-                if is_prov {
-                    final_lines.extend(provider_block_lines.clone());
-                }
-            }
-            new_lines = final_lines;
-        }
-
-        entry.lines = new_lines;
-    } else {
-        let new_llm_block = format!(
-            "- id: llm-pi-ai\n  name: \"@deepseek-ai/dsh-llm-pi-ai\"\n  config:\n    providers:\n{}\n",
-            provider_block
-        );
-        entries.push(DshPatchEntry {
-            id: "llm-pi-ai".to_string(),
-            lines: new_llm_block.lines().map(|s| s.to_string()).collect(),
-        });
-    }
-
-    // 3. 组装输出
-    let mut out = String::new();
-    if !header.is_empty() {
-        for l in header {
-            out.push_str(&l);
-            out.push('\n');
-        }
-    }
-    for e in entries {
-        for l in e.lines {
-            out.push_str(&l);
-            out.push('\n');
-        }
-    }
-
     out
+}
+
+fn dsh_last_entry(doc: &YamlDoc, id: &str) -> Option<usize> {
+    let root = doc.document_root(0).ok().flatten()?;
+    doc.sequence_items(root)
+        .enumerate()
+        .filter_map(|(index, _)| {
+            (dsh_value(doc, &format!("/{index}/id")).as_deref() == Some(id)).then_some(index)
+        })
+        .last()
+}
+
+fn dsh_patch_status(content: &str) -> (Option<String>, Option<String>) {
+    let Ok(doc) = YamlDoc::parse(content) else {
+        return (None, None);
+    };
+    let Some(index) = dsh_last_entry(&doc, "llm-pi-ai") else {
+        return (None, None);
+    };
+    let provider = format!("/{index}/config/providers/antigravity");
+    let model = dsh_last_entry(&doc, "agent-default-model")
+        .filter(|index| {
+            dsh_value(&doc, &format!("/{index}/config/provider")).as_deref() == Some("antigravity")
+        })
+        .and_then(|index| dsh_value(&doc, &format!("/{index}/config/model")));
+    let valid_models = dsh_node(&doc, &format!("{provider}/models")).is_some_and(|models| {
+        let mut models = doc.sequence_items(models).peekable();
+        models.peek().is_some()
+            && models.enumerate().all(|(index, _)| {
+                let path = format!("{provider}/models/{index}/reasoningEfforts");
+                dsh_node(&doc, &path).is_none_or(|efforts| {
+                    doc.mapping_entries(efforts).all(|(key, value)| {
+                        doc.scalar_value(key).is_ok_and(|name| match name.as_ref() {
+                            "off" => true,
+                            "minimal" | "low" | "medium" | "high" | "xhigh" | "max" => doc
+                                .scalar_value(value)
+                                .is_ok_and(|wire| !wire.trim().is_empty() && wire != "null"),
+                            _ => false,
+                        })
+                    })
+                })
+            })
+    });
+    let url = valid_models
+        .then(|| dsh_value(&doc, &format!("{provider}/baseURL")))
+        .flatten();
+    (url, model)
+}
+
+fn dsh_entry_config(doc: &mut YamlDoc, id: &str) -> Result<String, String> {
+    let index = match dsh_last_entry(doc, id) {
+        Some(index) => index,
+        None => {
+            let root = doc
+                .document_root(0)
+                .ok()
+                .flatten()
+                .ok_or("Missing DeepSeek Harness patch list")?;
+            let index = doc.sequence_items(root).count();
+            dsh_set(
+                doc,
+                "/-",
+                &serde_json::json!({ "id": id, "config": {} }).to_string(),
+            )?;
+            index
+        }
+    };
+    let path = format!("/{index}/config");
+    dsh_ensure_mapping(doc, &path)?;
+    Ok(path)
+}
+
+fn sync_dsh_cordis_patch_content(
+    content: &str,
+    proxy_url: &str,
+    selected_model: &str,
+) -> Result<String, String> {
+    let mut doc = YamlDoc::parse(if content.trim().is_empty() {
+        "[]\n"
+    } else {
+        content
+    })
+    .map_err(|error| format!("Invalid DeepSeek Harness patch: {error}"))?;
+
+    // Cordis applies overrides in order. Update the effective entry even if an
+    // earlier integration left another entry with the same id.
+    let provider = dsh_entry_config(&mut doc, "llm-pi-ai")?;
+    let providers = format!("{provider}/providers");
+    dsh_ensure_mapping(&mut doc, &providers)?;
+    dsh_set(
+        &mut doc,
+        &format!("{providers}/antigravity"),
+        &build_dsh_provider_block(proxy_url, selected_model),
+    )?;
+
+    let default = dsh_entry_config(&mut doc, "agent-default-model")?;
+    dsh_set(&mut doc, &format!("{default}/provider"), "\"antigravity\"")?;
+    dsh_set(
+        &mut doc,
+        &format!("{default}/model"),
+        &Value::from(selected_model).to_string(),
+    )?;
+    Ok(doc.as_source().to_owned())
 }
 
 #[cfg(test)]
@@ -2467,8 +2597,11 @@ model = "deepseek-chat"
     #[test]
     fn test_sync_dsh_credentials_content() {
         let empty = "";
-        let res1 = sync_dsh_credentials_content(empty, "sk-test1");
-        assert!(res1.contains("ANTIGRAVITY_API_KEY: sk-test1"));
+        let res1 = sync_dsh_credentials_content(empty, "sk-test1").unwrap();
+        assert_eq!(
+            dsh_value(&YamlDoc::parse(&res1).unwrap(), "/refs/ANTIGRAVITY_API_KEY").as_deref(),
+            Some("sk-test1")
+        );
 
         let existing = r#"version: 1
 records:
@@ -2480,9 +2613,53 @@ refs:
     ANTIGRAVITY_API_KEY: sk-old
   }
 "#;
-        let res2 = sync_dsh_credentials_content(existing, "sk-new");
+        let res2 = sync_dsh_credentials_content(existing, "sk-new").unwrap();
         assert!(res2.contains("sk-new"), "新 key 必须写入: {res2}");
         assert!(res2.contains("sk-kimi"), "其他 key 必须保留: {res2}");
+        let res3 = sync_dsh_credentials_content(&res2, "a#b: c").unwrap();
+        let doc = YamlDoc::parse(&res3).unwrap();
+        assert_eq!(
+            dsh_value(&doc, "/refs/ANTIGRAVITY_API_KEY").as_deref(),
+            Some("a#b: c")
+        );
+        assert_eq!(
+            dsh_value(&doc, "/refs/KIMI_KEY").as_deref(),
+            Some("sk-kimi")
+        );
+    }
+
+    #[test]
+    fn integration_restores_existing_and_removes_created_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let existing = dir.path().join("existing.json");
+        let created = dir.path().join("created.json");
+        fs::write(&existing, b"original").unwrap();
+
+        assert!(save_integration_backup(&existing).unwrap().is_some());
+        assert!(save_integration_backup(&created).unwrap().is_some());
+        write_agent_config(&existing, b"configured", 0o600).unwrap();
+        write_agent_config(&created, b"new config", 0o600).unwrap();
+        assert!(save_integration_backup(&existing).unwrap().is_none());
+
+        restore_integration_path(&existing).unwrap();
+        restore_integration_path(&created).unwrap();
+        assert_eq!(fs::read(&existing).unwrap(), b"original");
+        assert!(!created.exists());
+        assert!(!has_integration_backup(&existing));
+        assert!(!has_integration_backup(&created));
+    }
+
+    #[test]
+    fn integration_can_discard_backup_before_any_write() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("settings.json");
+        fs::write(&config, b"original").unwrap();
+
+        save_integration_backup(&config).unwrap();
+        restore_integration_path(&config).unwrap();
+
+        assert_eq!(fs::read(&config).unwrap(), b"original");
+        assert!(!has_integration_backup(&config));
     }
 
     #[test]
@@ -2492,42 +2669,80 @@ refs:
             empty,
             "http://127.0.0.1:8045/v1",
             "gemini-3.8-flash-high",
+        )
+        .unwrap();
+        assert_eq!(
+            dsh_patch_status(&res1),
+            (
+                Some("http://127.0.0.1:8045/v1".to_string()),
+                Some("gemini-3.8-flash-high".to_string())
+            )
         );
-        assert!(res1.contains("provider: antigravity"));
-        assert!(res1.contains("model: gemini-3.8-flash-high"));
-        assert!(res1.contains("baseURL: http://127.0.0.1:8045/v1"));
-        assert!(res1.contains("apiKeyEnv: ANTIGRAVITY_API_KEY"));
+        let doc = YamlDoc::parse(&res1).unwrap();
+        let provider = dsh_last_entry(&doc, "llm-pi-ai").unwrap();
+        assert_eq!(
+            dsh_value(
+                &doc,
+                &format!("/{provider}/config/providers/antigravity/apiKeyEnv")
+            )
+            .as_deref(),
+            Some("ANTIGRAVITY_API_KEY"),
+        );
 
         let existing = r#"- id: ui-settings
   config:
     enabled: true
 - id: agent-default-model
   config:
+    provider: antigravity
+    model: previous
+- id: agent-default-model # keep the effective entry
+  config:
     provider: deepseek-official
     model: deepseek-chat
-- id: llm-pi-ai
+- id: llm-pi-ai # keep other providers and nested model ids
   config:
     providers:
+      antigravity:
+        baseURL: http://127.0.0.1:8045/v1
+        models:
+          - id: old-model
+            reasoningEfforts:
+              default: null
       kimi-k3:
         displayName: kimi-k3
         baseURL: https://hubway.cc
+        models:
+          - id: kimi-chat
 "#;
+        assert_eq!(dsh_patch_status(existing).0, None);
         let res2 = sync_dsh_cordis_patch_content(
             existing,
             "http://127.0.0.1:8045/v1",
             "claude-sonnet-4-6",
+        )
+        .unwrap();
+        assert_eq!(
+            dsh_patch_status(&res2).1.as_deref(),
+            Some("claude-sonnet-4-6")
         );
-        assert!(res2.contains("provider: antigravity"));
-        assert!(res2.contains("model: claude-sonnet-4-6"));
-        assert!(res2.contains("baseURL: http://127.0.0.1:8045/v1"));
         assert!(res2.contains("kimi-k3:"));
         assert!(res2.contains("ui-settings"));
+        assert!(res2.contains("# keep the effective entry"));
+        assert!(res2.contains("- id: kimi-chat"));
+        assert!(!res2.contains("default: null"));
 
         // 二次同步覆盖（更新模型与代理端口）
         let res3 =
-            sync_dsh_cordis_patch_content(&res2, "http://127.0.0.1:9000/v1", "gpt-oss-120b-medium");
-        assert!(res3.contains("model: gpt-oss-120b-medium"));
-        assert!(res3.contains("baseURL: http://127.0.0.1:9000/v1"));
+            sync_dsh_cordis_patch_content(&res2, "http://127.0.0.1:9000/v1", "gpt-oss-120b-medium")
+                .unwrap();
+        assert_eq!(
+            dsh_patch_status(&res3),
+            (
+                Some("http://127.0.0.1:9000/v1".to_string()),
+                Some("gpt-oss-120b-medium".to_string())
+            )
+        );
         assert!(!res3.contains("baseURL: http://127.0.0.1:8045/v1"));
         assert!(res3.contains("kimi-k3:"));
     }

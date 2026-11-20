@@ -15,6 +15,14 @@ const DROID_DIR: &str = ".factory";
 const DROID_CONFIG_FILE: &str = "settings.json";
 const BACKUP_SUFFIX: &str = ".antigravity.bak";
 const AG_ID_PREFIX: &str = "custom:AG-";
+static DROID_CONFIG_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn is_managed_model(model: &Value) -> bool {
+    model
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| id.starts_with(AG_ID_PREFIX))
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DroidStatus {
@@ -183,8 +191,7 @@ fn count_synced_models(json: &Value) -> (usize, Option<String>) {
 
     if let Some(arr) = json.get("customModels").and_then(|v| v.as_array()) {
         for m in arr {
-            let id = m.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-            if !id.starts_with(AG_ID_PREFIX) {
+            if !is_managed_model(m) {
                 continue;
             }
             count += 1;
@@ -241,14 +248,19 @@ fn create_backup(path: &PathBuf) -> Result<(), String> {
 
 /// 接收前端 preview 里完整的 customModels 数组，直接替换写入
 pub fn sync_droid_config(full_custom_models: Vec<Value>) -> Result<usize, String> {
+    update_droid_models(full_custom_models, false)
+}
+
+fn update_droid_models(models: Vec<Value>, managed_only: bool) -> Result<usize, String> {
+    let _lock = DROID_CONFIG_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let config_path =
         get_config_path().ok_or_else(|| "Failed to get Droid config directory".to_string())?;
 
-    if let Some(parent) = config_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    if managed_only && models.is_empty() && !config_path.exists() {
+        return Ok(0);
     }
-
-    create_backup(&config_path)?;
 
     let mut config: Value = if config_path.exists() {
         let content = fs::read_to_string(&config_path)
@@ -259,34 +271,61 @@ pub fn sync_droid_config(full_custom_models: Vec<Value>) -> Result<usize, String
     };
 
     if !config.is_object() {
+        if managed_only {
+            return Err("Droid settings must contain a JSON object".to_string());
+        }
         config = serde_json::json!({});
     }
 
-    let ag_count = full_custom_models
+    let count = models
         .iter()
-        .filter(|m| {
-            m.get("id")
-                .and_then(|v| v.as_str())
-                .map(|s| s.starts_with(AG_ID_PREFIX))
-                .unwrap_or(false)
-        })
+        .filter(|model| is_managed_model(model))
         .count();
+    let custom_models = if managed_only {
+        if count != models.len() {
+            return Err("Only gateway-managed Droid models can be configured here".to_string());
+        }
+        let current = match config.get("customModels") {
+            Some(Value::Array(entries)) => entries.as_slice(),
+            None => &[],
+            _ => return Err("Droid customModels must be an array".to_string()),
+        };
+        if models.is_empty() && !current.iter().any(is_managed_model) {
+            return Ok(0);
+        }
+        let mut merged: Vec<Value> = current
+            .iter()
+            .filter(|model| !is_managed_model(model))
+            .cloned()
+            .collect();
+        let next_index = merged
+            .iter()
+            .filter_map(|model| model.get("index").and_then(Value::as_u64))
+            .max()
+            .map_or(0, |index| index.saturating_add(1));
+        for (offset, mut model) in models.into_iter().enumerate() {
+            model["index"] = Value::from(next_index.saturating_add(offset as u64));
+            merged.push(model);
+        }
+        merged
+    } else {
+        models
+    };
+    config["customModels"] = Value::Array(custom_models);
 
-    config
-        .as_object_mut()
-        .unwrap()
-        .insert("customModels".to_string(), Value::Array(full_custom_models));
-
-    let tmp_path = config_path.with_extension("tmp");
-    fs::write(&tmp_path, serde_json::to_string_pretty(&config).unwrap())
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
-    fs::rename(&tmp_path, &config_path)
-        .map_err(|e| format!("Failed to rename config file: {}", e))?;
-
-    Ok(ag_count)
+    if let Some(parent) = config_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+    create_backup(&config_path)?;
+    let content = serde_json::to_vec_pretty(&config).map_err(|error| error.to_string())?;
+    super::cli_sync::write_agent_config(&config_path, &content, 0o600)?;
+    Ok(count)
 }
 
 pub fn restore_droid_config() -> Result<(), String> {
+    let _lock = DROID_CONFIG_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     let config_path =
         get_config_path().ok_or_else(|| "Failed to get Droid config directory".to_string())?;
 
@@ -338,10 +377,19 @@ pub async fn get_droid_sync_status(proxy_url: String) -> Result<DroidStatus, Str
 }
 
 #[tauri::command]
-pub async fn execute_droid_sync(custom_models: Vec<Value>) -> Result<usize, String> {
-    tokio::task::spawn_blocking(move || sync_droid_config(custom_models))
-        .await
-        .unwrap_or_else(|_| Err("Task panicked".to_string()))
+pub async fn execute_droid_sync(
+    custom_models: Vec<Value>,
+    managed_only: Option<bool>,
+) -> Result<usize, String> {
+    tokio::task::spawn_blocking(move || {
+        if managed_only.unwrap_or(false) {
+            update_droid_models(custom_models, true)
+        } else {
+            sync_droid_config(custom_models)
+        }
+    })
+    .await
+    .unwrap_or_else(|_| Err("Task panicked".to_string()))
 }
 
 #[tauri::command]

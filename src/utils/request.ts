@@ -6,6 +6,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   // Accounts
   'list_accounts': { url: '/api/accounts', method: 'GET' },
   'get_current_account': { url: '/api/accounts/current', method: 'GET' },
+  'get_active_clients_status': { url: '/api/accounts/active-clients', method: 'GET' },
   'switch_account': { url: '/api/accounts/switch', method: 'POST' },
   'add_account': { url: '/api/accounts', method: 'POST' },
   'batch_import_accounts': { url: '/api/accounts/batch-import', method: 'POST' },
@@ -35,6 +36,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
 
   // Proxy Control & Status
   'get_proxy_status': { url: '/api/proxy/status', method: 'GET' },
+  'get_proxy_model_catalog': { url: '/api/proxy/model-catalog', method: 'GET' },
   'start_proxy_service': { url: '/api/proxy/start', method: 'POST' },
   'stop_proxy_service': { url: '/api/proxy/stop', method: 'POST' },
   'update_model_mapping': { url: '/api/proxy/mapping', method: 'POST' },
@@ -79,10 +81,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
 
   // OpenCode Sync
   'get_opencode_sync_status': { url: '/api/proxy/opencode/status', method: 'POST' },
-  'get_opencode_providers': { url: '/api/proxy/opencode/providers', method: 'GET' },
   'execute_opencode_sync': { url: '/api/proxy/opencode/sync', method: 'POST' },
-  'execute_opencode_openai_sync': { url: '/api/proxy/opencode/openai-sync', method: 'POST' },
-  'execute_opencode_remove_provider': { url: '/api/proxy/opencode/remove-provider', method: 'POST' },
   'execute_opencode_restore': { url: '/api/proxy/opencode/restore', method: 'POST' },
   'execute_opencode_clear': { url: '/api/proxy/opencode/clear', method: 'POST' },
   'get_opencode_config_content': { url: '/api/proxy/opencode/config', method: 'POST' },
@@ -101,6 +100,11 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   'execute_openclaw_restore': { url: '/api/proxy/openclaw/restore', method: 'POST' },
   'execute_openclaw_clear': { url: '/api/proxy/openclaw/clear', method: 'POST' },
   'get_openclaw_config_content': { url: '/api/proxy/openclaw/config', method: 'POST' },
+
+  // Droid custom model configuration
+  'get_droid_sync_status': { url: '/api/proxy/droid/status', method: 'POST' },
+  'execute_droid_sync': { url: '/api/proxy/droid/sync', method: 'POST' },
+  'get_droid_config_content': { url: '/api/proxy/droid/config', method: 'POST' },
 
   // Stats
   'get_token_stats_hourly': { url: '/api/stats/token/hourly', method: 'GET' },

@@ -1,0 +1,158 @@
+name: Package and Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish to GitHub Releases (unchecked: build Actions artifacts only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  verify-target:
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.gate.outputs.release_tag }}
+      is_prerelease: ${{ steps.gate.outputs.is_prerelease }}
+      publish: ${{ steps.gate.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify version and channel
+        id: gate
+        shell: bash
+        env:
+          PUBLISH: ${{ github.event_name == 'push' || inputs.publish_release == true }}
+        run: bash scripts/verify-release.sh
+
+  package:
+    name: Package (${{ matrix.asset }})
+    needs: verify-target
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - asset: macos-arm64
+            runner: macos-latest
+            target: aarch64-apple-darwin
+            bundles: dmg
+          - asset: macos-x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: dmg
+          - asset: linux-x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - asset: linux-arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            bundles: deb,rpm,appimage
+          - asset: windows-x64
+            runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            bundles: nsis,msi
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang cmake libclang-dev curl wget file \
+            libayatana-appindicator3-dev libgtk-3-dev libnm-dev librsvg2-dev \
+            libssl-dev libwebkit2gtk-4.1-dev patchelf pkg-config xdg-utils
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: package-${{ matrix.target }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Build and stage installers
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+          BUNDLES: ${{ matrix.bundles }}
+          PRERELEASE: ${{ needs.verify-target.outputs.is_prerelease }}
+        run: |
+          $bundles = $env:BUNDLES
+          if ($env:RUNNER_OS -eq 'Windows' -and $env:PRERELEASE -eq 'true') {
+            # WiX does not support the SemVer prerelease suffix.
+            $bundles = 'nsis'
+          }
+          $configFile = Join-Path $env:RUNNER_TEMP 'tauri-package.json'
+          '{"bundle":{"createUpdaterArtifacts":false}}' | Set-Content -Path $configFile -Encoding utf8
+          npm run tauri build -- --ci --target $env:TARGET --bundles $bundles --config $configFile -- --locked
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $bundleDir = "src-tauri/target/$env:TARGET/release/bundle"
+          $extensions = @{ dmg = '*.dmg'; deb = '*.deb'; rpm = '*.rpm'; appimage = '*.AppImage'; nsis = '*.exe'; msi = '*.msi' }
+          New-Item -ItemType Directory -Path 'package-assets' | Out-Null
+          foreach ($format in ($bundles -split ',')) {
+            $files = Get-ChildItem -Path "$bundleDir/$format/$($extensions[$format])" -File -ErrorAction SilentlyContinue
+            if (-not $files) { throw "No $format installers found under $bundleDir" }
+            $files | Copy-Item -Destination 'package-assets/'
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.asset }}
+          path: package-assets/*
+          compression-level: 0
+          if-no-files-found: error
+
+  publish:
+    needs: [verify-target, package]
+    if: needs.verify-target.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-${{ needs.verify-target.outputs.release_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          path: all-artifacts
+          pattern: package-*
+      - name: Collect installers, notes and checksums
+        env:
+          RELEASE_TAG: ${{ needs.verify-target.outputs.release_tag }}
+        run: bash scripts/assemble-release.sh
+      - name: Create GitHub Release after all uploads succeed
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ needs.verify-target.outputs.release_tag }}
+          commit: ${{ github.sha }}
+          name: DeepGeminiProxy ${{ needs.verify-target.outputs.release_tag }}
+          bodyFile: release_notes.md
+          generateReleaseNotes: true
+          artifacts: release-files/*
+          artifactErrorsFailBuild: true
+          immutableCreate: true
+          skipIfReleaseExists: true
+          prerelease: ${{ needs.verify-target.outputs.is_prerelease == 'true' }}
+          makeLatest: ${{ needs.verify-target.outputs.is_prerelease == 'true' && 'false' || 'true' }}

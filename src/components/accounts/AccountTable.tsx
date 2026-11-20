@@ -48,8 +48,9 @@ import {
     ArrowUp,
     ArrowDown,
 } from 'lucide-react';
-import { type Account, type ActiveClientsStatus, getAccountTier, hasAccountArgonCapability } from '../../types/account';
+import { type Account, type ActiveClientsStatus, getAccountTier, hasAccountArgonCapability, getActiveClientAccountIds } from '../../types/account';
 import { useTranslation } from 'react-i18next';
+import { AccountActivationButton, ActiveClientBadges } from './AccountActivation';
 import { cn } from '../../utils/cn';
 
 import { useConfigStore } from '../../stores/useConfigStore';
@@ -76,6 +77,7 @@ interface AccountTableProps {
     activeClients?: ActiveClientsStatus;
     switchingAccountId: string | null;
     onSwitch: (accountId: string, targetIde?: string) => void;
+    onActivate?: (accountId: string) => void;
     onRefresh: (accountId: string) => void;
     onViewDevice: (accountId: string) => void;
     onViewDetails: (accountId: string) => void;
@@ -99,6 +101,7 @@ interface SortableRowProps {
     isDragging?: boolean;
     onSelect: () => void;
     onSwitch: (targetIde?: string) => void;
+    onActivate?: () => void;
     onRefresh: () => void;
     onViewDevice: () => void;
     onViewDetails: () => void;
@@ -119,6 +122,7 @@ interface AccountRowContentProps {
     isSwitching: boolean;
     isDisabled: boolean;
     onSwitch: (targetIde?: string) => void;
+    onActivate?: () => void;
     onRefresh: () => void;
     onViewDevice: () => void;
     onViewDetails: () => void;
@@ -197,6 +201,7 @@ function SortableAccountRow({
     isDragging,
     onSelect,
     onSwitch,
+    onActivate,
     onRefresh,
     onViewDevice,
     onViewDetails,
@@ -225,10 +230,8 @@ function SortableAccountRow({
         zIndex: isSortableDragging ? 1000 : 'auto',
     };
 
-    const isClassic = activeClients?.classic_account_id === account.id;
-    const isIde = activeClients?.ide_account_id === account.id;
-    const isAgy = activeClients?.agy_account_id === account.id;
-    const isRowCurrent = isCurrent || isClassic || isIde || isAgy;
+    const isClientActive = getActiveClientAccountIds(activeClients).has(account.id);
+    const isRowCurrent = isCurrent || isClientActive;
 
     return (
         <tr
@@ -275,6 +278,7 @@ function SortableAccountRow({
                 isSwitching={isSwitching}
                 isDisabled={Boolean(account.disabled)}
                 onSwitch={onSwitch}
+                onActivate={onActivate}
                 onRefresh={onRefresh}
                 onViewDevice={onViewDevice}
                 onViewDetails={onViewDetails}
@@ -301,6 +305,7 @@ function AccountRowContent({
     isSwitching,
     isDisabled,
     onSwitch,
+    onActivate,
     onRefresh,
     onViewDevice,
     onViewDetails,
@@ -319,10 +324,8 @@ function AccountRowContent({
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [labelInput, setLabelInput] = useState(account.custom_label || '');
 
-    const isClassic = activeClients?.classic_account_id === account.id;
-    const isIde = activeClients?.ide_account_id === account.id;
-    const isAgy = activeClients?.agy_account_id === account.id;
-    const isRowActive = isCurrent || isClassic || isIde || isAgy;
+    const isClientActive = getActiveClientAccountIds(activeClients).has(account.id);
+    const isRowActive = isCurrent || isClientActive;
 
     const handleSaveLabel = () => {
         if (onUpdateLabel) {
@@ -385,31 +388,8 @@ function AccountRowContent({
                     </span>
 
                     <div className="flex flex-wrap items-center gap-1.5 min-w-0">
-                        {isClassic && (
-                            <span
-                                className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[10px] font-bold shadow-sm border border-blue-200/50 dark:border-blue-800/50"
-                                title={t('accounts.client_classic_tooltip', '当前 Antigravity 经典款客户端登录账号')}
-                            >
-                                {t('accounts.client_classic', '经典款')}
-                            </span>
-                        )}
-                        {isIde && (
-                            <span
-                                className="px-2 py-0.5 rounded-md bg-sky-100 dark:bg-sky-900/50 text-sky-700 dark:text-sky-300 text-[10px] font-bold shadow-sm border border-sky-200/50 dark:border-sky-800/50"
-                                title={t('accounts.client_ide_tooltip', '当前 Antigravity IDE 客户端登录账号')}
-                            >
-                                {t('accounts.client_ide', 'IDE')}
-                            </span>
-                        )}
-                        {isAgy && (
-                            <span
-                                className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold shadow-sm border border-emerald-200/50 dark:border-emerald-800/50"
-                                title={t('accounts.client_cli_tooltip', '当前 Antigravity CLI (agy) 登录账号')}
-                            >
-                                {t('accounts.client_cli', 'CLI')}
-                            </span>
-                        )}
-                        {!isClassic && !isIde && !isAgy && isCurrent && (
+                        <ActiveClientBadges accountId={account.id} status={activeClients} />
+                        {!isClientActive && isCurrent && (
                             <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 text-[10px] font-bold shadow-sm border border-blue-200/50 dark:border-blue-800/50">
                                 {t('accounts.current').toUpperCase()}
                             </span>
@@ -643,6 +623,7 @@ function AccountRowContent({
                 !isCurrent && "group-hover:bg-gray-50 dark:group-hover:bg-base-200"
             )}>
                 <div className="flex flex-wrap items-center justify-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity max-w-[220px] mx-auto">
+                    {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
                     <button
                         className="p-1.5 text-gray-500 dark:text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}
@@ -768,6 +749,7 @@ function AccountTable({
     activeClients,
     switchingAccountId,
     onSwitch,
+    onActivate,
     onRefresh,
     onViewDevice,
     onViewDetails,
@@ -792,6 +774,7 @@ function AccountTable({
     });
 
     const isSortingActive = sortConfig.key !== null && sortConfig.direction !== null;
+    const activeClientIds = useMemo(() => getActiveClientAccountIds(activeClients), [activeClients]);
 
     const handleSortToggle = (key: 'reset_time' | 'last_used') => {
         setSortConfig(prev => {
@@ -810,6 +793,9 @@ function AccountTable({
         if (!isSortingActive) return accounts;
 
         return [...accounts].sort((a, b) => {
+            const activeOrder = Number(activeClientIds.has(b.id)) - Number(activeClientIds.has(a.id));
+            if (activeOrder !== 0) return activeOrder;
+
             if (sortConfig.key === 'reset_time') {
                 const timeA = extractAccountResetTime(a);
                 const timeB = extractAccountResetTime(b);
@@ -831,7 +817,7 @@ function AccountTable({
 
             return 0;
         });
-    }, [accounts, sortConfig, isSortingActive]);
+    }, [accounts, sortConfig, isSortingActive, activeClientIds]);
 
     // 配置拖拽传感器
     const sensors = useSensors(
@@ -855,15 +841,15 @@ function AccountTable({
         const { active, over } = event;
         setActiveId(null);
 
-        if (isSortingActive) return;
+        if (isSortingActive || !onReorder || !over || active.id === over.id) return;
 
-        if (over && active.id !== over.id) {
-            const oldIndex = accountIds.indexOf(active.id as string);
-            const newIndex = accountIds.indexOf(over.id as string);
-
-            if (oldIndex !== -1 && newIndex !== -1 && onReorder) {
-                onReorder(arrayMove(accountIds, oldIndex, newIndex));
-            }
+        // Change manual order only within the dragged account's group.
+        const isActive = activeClientIds.has(String(active.id));
+        const groupIds = accountIds.filter(id => activeClientIds.has(id) === isActive);
+        const oldIndex = groupIds.indexOf(String(active.id));
+        const newIndex = groupIds.indexOf(String(over.id));
+        if (oldIndex !== -1 && newIndex !== -1) {
+            onReorder(arrayMove(groupIds, oldIndex, newIndex));
         }
     };
 
@@ -952,6 +938,7 @@ function AccountTable({
                                     isDragging={account.id === activeId}
                                     onSelect={() => onToggleSelect(account.id)}
                                     onSwitch={(targetIde?: string) => onSwitch(account.id, targetIde)}
+                                    onActivate={onActivate ? () => onActivate(account.id) : undefined}
                                     onRefresh={() => onRefresh(account.id)}
                                     onViewDevice={() => onViewDevice(account.id)}
                                     onViewDetails={() => onViewDetails(account.id)}

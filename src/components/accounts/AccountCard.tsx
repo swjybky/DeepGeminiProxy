@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowRightLeft, RefreshCw, Trash2, Download, Info, Lock, Ban, Diamond, Gem, Circle, ToggleLeft, ToggleRight, Fingerprint, Sparkles, Tag, X, Check, Clock, Repeat2, Terminal } from 'lucide-react';
-import { Account, ActiveClientsStatus, getAccountTier, hasAccountArgonCapability } from '../../types/account';
+import { Account, ActiveClientsStatus, getAccountTier, hasAccountArgonCapability, getActiveClientAccountIds } from '../../types/account';
 import { cn } from '../../utils/cn';
 import { useTranslation } from 'react-i18next';
+import { AccountActivationButton, ActiveClientBadges } from './AccountActivation';
 import { useConfigStore } from '../../stores/useConfigStore';
 import { useAccountStore } from '../../stores/useAccountStore';
 import { GroupQuotaCard } from './GroupQuotaCard';
@@ -23,6 +24,7 @@ interface AccountCardProps {
     isRefreshing: boolean;
     isSwitching?: boolean;
     onSwitch: (targetIde?: string) => void;
+    onActivate?: () => void;
     onRefresh: () => void;
     onViewDevice: () => void;
     onViewDetails: () => void;
@@ -34,7 +36,7 @@ interface AccountCardProps {
     onViewError: () => void;
 }
 
-function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, activeClients, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
+function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, activeClients, isRefreshing, isSwitching = false, onSwitch, onActivate, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice, onWarmup, onUpdateLabel, onViewError }: AccountCardProps) {
     const { t } = useTranslation();
     const { config } = useConfigStore();
     const isDisabled = Boolean(account.disabled);
@@ -44,10 +46,8 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
     const [isEditingLabel, setIsEditingLabel] = useState(false);
     const [labelInput, setLabelInput] = useState(account.custom_label || '');
 
-    const isClassic = activeClients?.classic_account_id === account.id;
-    const isIde = activeClients?.ide_account_id === account.id;
-    const isAgy = activeClients?.agy_account_id === account.id;
-    const isCurrent = propIsCurrent || isClassic || isIde || isAgy;
+    const isClientActive = getActiveClientAccountIds(activeClients).has(account.id);
+    const isCurrent = propIsCurrent || isClientActive;
 
     const handleSaveLabel = () => {
         if (onUpdateLabel) {
@@ -140,31 +140,8 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                     </h3>
                     <div className="flex items-center justify-between w-full gap-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                            {isClassic && (
-                                <span
-                                    className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-bold shadow-sm border border-blue-200/50"
-                                    title={t('accounts.client_classic_tooltip', '当前 Antigravity 经典款客户端登录账号')}
-                                >
-                                    {t('accounts.client_classic', '经典款')}
-                                </span>
-                            )}
-                            {isIde && (
-                                <span
-                                    className="px-1.5 py-0.5 rounded-md bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300 text-[9px] font-bold shadow-sm border border-sky-200/50"
-                                    title={t('accounts.client_ide_tooltip', '当前 Antigravity IDE 客户端登录账号')}
-                                >
-                                    {t('accounts.client_ide', 'IDE')}
-                                </span>
-                            )}
-                            {isAgy && (
-                                <span
-                                    className="px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold shadow-sm border border-emerald-200/50"
-                                    title={t('accounts.client_cli_tooltip', '当前 Antigravity CLI (agy) 登录账号')}
-                                >
-                                    {t('accounts.client_cli', 'CLI')}
-                                </span>
-                            )}
-                            {!isClassic && !isIde && !isAgy && propIsCurrent && (
+                            <ActiveClientBadges accountId={account.id} status={activeClients} />
+                            {!isClientActive && propIsCurrent && (
                                 <span className="px-1.5 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-bold shadow-sm border border-blue-200/50">
                                     {t('accounts.current').toUpperCase()}
                                 </span>
@@ -373,6 +350,7 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                     </div>
                 )}
                 <div className="flex flex-wrap items-center justify-center gap-1 w-full">
+                    {onActivate && <AccountActivationButton onClick={onActivate} disabled={isSwitching || isDisabled} />}
                     <button
                         className="p-1.5 text-gray-400 hover:text-sky-600 dark:hover:text-sky-400 hover:bg-sky-50 dark:hover:bg-sky-900/30 rounded-lg transition-all"
                         onClick={(e) => { e.stopPropagation(); onViewDetails(); }}

@@ -1,6 +1,8 @@
 use crate::proxy::monitor::{ProxyMonitor, ProxyRequestLog, ProxyStats};
+use crate::proxy::server::detect_lan_ipv4;
 use crate::proxy::{ProxyConfig, ProxyPoolConfig, TokenManager};
 use serde::{Deserialize, Serialize};
+use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::State;
@@ -12,6 +14,7 @@ pub struct ProxyStatus {
     pub running: bool,
     pub port: u16,
     pub base_url: String,
+    pub lan_ip: Option<Ipv4Addr>,
     pub active_accounts: usize,
 }
 
@@ -197,6 +200,7 @@ pub async fn internal_start_proxy_service(
             running: false,
             port: config.port,
             base_url: format!("http://127.0.0.1:{}", config.port),
+            lan_ip: detect_lan_ipv4(),
             active_accounts: 0,
         });
     }
@@ -226,8 +230,9 @@ pub async fn internal_start_proxy_service(
     // 但其实我们可以直接手动掉，或者相信 guard
     Ok(ProxyStatus {
         running: true,
-        port: config.port,
-        base_url: format!("http://127.0.0.1:{}", config.port),
+        port: axum_server.port,
+        base_url: format!("http://127.0.0.1:{}", axum_server.port),
+        lan_ip: detect_lan_ipv4(),
         active_accounts,
     })
 }
@@ -291,6 +296,7 @@ pub async fn ensure_admin_server(
         cloudflared_state,
         config.proxy_pool.clone(),
         config.only_raw_quota_models,
+        config.enabled_models.clone(),
         config.image_scheduler.clone(),
     )
     .await
@@ -364,6 +370,7 @@ pub async fn get_proxy_status(state: State<'_, ProxyServiceState>) -> Result<Pro
             running: false, // 逻辑上还没运行
             port: 0,
             base_url: "starting".to_string(), // 给前端标识
+            lan_ip: None,
             active_accounts: 0,
         });
     }
@@ -375,14 +382,16 @@ pub async fn get_proxy_status(state: State<'_, ProxyServiceState>) -> Result<Pro
         Ok(instance_lock) => match instance_lock.as_ref() {
             Some(instance) => Ok(ProxyStatus {
                 running: true,
-                port: instance.config.port,
-                base_url: format!("http://127.0.0.1:{}", instance.config.port),
+                port: instance.axum_server.port,
+                base_url: format!("http://127.0.0.1:{}", instance.axum_server.port),
+                lan_ip: detect_lan_ipv4(),
                 active_accounts: instance.token_manager.len(),
             }),
             None => Ok(ProxyStatus {
                 running: false,
                 port: 0,
                 base_url: String::new(),
+                lan_ip: detect_lan_ipv4(),
                 active_accounts: 0,
             }),
         },
@@ -392,10 +401,34 @@ pub async fn get_proxy_status(state: State<'_, ProxyServiceState>) -> Result<Pro
                 running: false,
                 port: 0,
                 base_url: "busy".to_string(),
+                lan_ip: None,
                 active_accounts: 0,
             })
         }
     }
+}
+
+#[tauri::command]
+pub async fn get_proxy_model_catalog(
+    state: State<'_, ProxyServiceState>,
+) -> Result<Vec<String>, String> {
+    let server = state
+        .admin_server
+        .read()
+        .await
+        .as_ref()
+        .map(|admin| admin.axum_server.clone());
+    if let Some(server) = server {
+        return Ok(server.model_catalog().await);
+    }
+
+    let config = crate::modules::config::load_app_config()?.proxy;
+    Ok(crate::proxy::common::model_mapping::get_all_dynamic_models(
+        &tokio::sync::RwLock::new(config.custom_mapping),
+        None,
+        config.only_raw_quota_models,
+    )
+    .await)
 }
 
 /// 获取反代服务统计
@@ -623,20 +656,15 @@ pub async fn update_model_mapping(
     config: ProxyConfig,
     state: State<'_, ProxyServiceState>,
 ) -> Result<(), String> {
-    let instance_lock = state.instance.read().await;
-
-    // 1. 如果服务正在运行，立即更新内存中的映射 (这里目前只更新了 anthropic_mapping 的 RwLock,
-    // 后续可以根据需要让 resolve_model_route 直接读取全量 config)
-    if let Some(instance) = instance_lock.as_ref() {
-        instance.axum_server.update_mapping(&config).await;
-        tracing::debug!("后端服务已接收全量模型映射配置");
-    }
-
-    // 2. 无论是否运行，都保存到全局配置持久化
     let mut app_config = crate::modules::config::load_app_config().map_err(|e| e)?;
     app_config.proxy.custom_mapping = config.custom_mapping;
     app_config.proxy.custom_mapping_expose = config.custom_mapping_expose;
-    crate::modules::config::save_app_config(&app_config).map_err(|e| e)?;
+    crate::modules::config::save_app_config(&app_config)?;
+
+    // The gateway and the model catalog share the admin server, including while forwarding is stopped.
+    if let Some(admin) = state.admin_server.read().await.as_ref() {
+        admin.axum_server.update_mapping(&app_config.proxy).await;
+    }
 
     Ok(())
 }

@@ -1158,6 +1158,10 @@ pub struct ProxyConfig {
     #[serde(default)]
     pub only_raw_quota_models: bool,
 
+    /// Public model IDs. None enables the full catalog, while an empty list disables all IDs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_models: Option<Vec<String>>,
+
     /// 自定义 User-Agent 请求头 (可选覆盖)
     #[serde(default)]
     pub user_agent_override: Option<String>,
@@ -1385,6 +1389,7 @@ impl Default for ProxyConfig {
             debug_logging: DebugLoggingConfig::default(),
             upstream_proxy: UpstreamProxyConfig::default(),
             only_raw_quota_models: false,
+            enabled_models: None,
             scheduling: crate::proxy::sticky_config::StickySessionConfig::default(),
             experimental: ExperimentalConfig::default(),
             security_monitor: SecurityMonitorConfig::default(),

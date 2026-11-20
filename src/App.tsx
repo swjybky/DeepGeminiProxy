@@ -5,13 +5,13 @@ import Dashboard from './pages/Dashboard';
 import Accounts from './pages/Accounts';
 import Settings from './pages/Settings';
 import ApiProxy from './pages/ApiProxy';
+import AgentTools from './pages/AgentTools';
 import Monitor from './pages/Monitor';
 import TokenStats from './pages/TokenStats';
 import Security from './pages/Security';
 import ThemeManager from './components/common/ThemeManager';
 import ZoomManager from './components/common/ZoomManager';
 import UserToken from './pages/UserToken';
-import { ApiKeyFun } from './pages/ApiKeyFun';
 import { UpdateNotification } from './components/UpdateNotification';
 import SuggestionDeleteThinkingModal from './components/common/SuggestionDeleteThinkingModal';
 import DebugConsole from './components/debug/DebugConsole';
@@ -54,6 +54,10 @@ const router = createBrowserRouter([
         element: <ApiProxy />,
       },
       {
+        path: 'agent-tools',
+        element: <AgentTools />,
+      },
+      {
         path: 'monitor',
         element: <Monitor />,
       },
@@ -64,10 +68,6 @@ const router = createBrowserRouter([
       {
         path: 'user-token',
         element: <UserToken />,
-      },
-      {
-        path: 'apikey-fun',
-        element: <ApiKeyFun />,
       },
       {
         path: 'security',

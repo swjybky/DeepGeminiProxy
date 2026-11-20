@@ -3,16 +3,14 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const GITHUB_API_URL: &str =
-    "https://api.github.com/repos/lbjlaq/Antigravity-Manager/releases/latest";
+const GITHUB_RELEASES_URL: &str = "https://github.com/swjybky/DeepGeminiProxy/releases";
+const GITHUB_API_URL: &str = "https://api.github.com/repos/swjybky/DeepGeminiProxy/releases/latest";
 const GITHUB_RELEASES_API_URL: &str =
-    "https://api.github.com/repos/lbjlaq/Antigravity-Manager/releases?per_page=15";
-const GITHUB_RAW_URL: &str =
-    "https://raw.githubusercontent.com/lbjlaq/Antigravity-Manager/main/package.json";
-const JSDELIVR_URL: &str =
-    "https://cdn.jsdelivr.net/gh/lbjlaq/Antigravity-Manager@main/package.json";
+    "https://api.github.com/repos/swjybky/DeepGeminiProxy/releases?per_page=15";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 const DEFAULT_CHECK_INTERVAL_HOURS: u64 = 24;
+#[cfg(target_os = "macos")]
+const HOMEBREW_CASK: &str = "deepgeminiproxy";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -138,9 +136,9 @@ struct GitHubReleaseAsset {
 }
 
 pub const STABLE_UPDATER_JSON_URL: &str =
-    "https://github.com/lbjlaq/Antigravity-Manager/releases/latest/download/updater.json";
+    "https://github.com/swjybky/DeepGeminiProxy/releases/latest/download/updater.json";
 pub const PREVIEW_UPDATER_JSON_URL: &str =
-    "https://github.com/lbjlaq/Antigravity-Manager/releases/download/preview/updater.json";
+    "https://github.com/swjybky/DeepGeminiProxy/releases/download/preview/updater.json";
 
 pub fn get_upstream_proxy_url() -> Option<String> {
     if let Ok(config) = crate::modules::config::load_app_config() {
@@ -181,12 +179,7 @@ pub fn get_upstream_proxy_url() -> Option<String> {
     None
 }
 
-/// Check for updates with improved strategy:
-/// 1. Check updater.json (Source of Truth for Auto-Update)
-/// 2. Fallback to GitHub API (Informational)
-/// Check for updates with improved strategy:
-/// 1. Check updater.json based on selected channel (Stable vs Beta)
-/// 2. Fallback to GitHub API (Release or Pre-release)
+/// Prefer the selected channel's update manifest, then fall back to published Releases.
 pub async fn check_for_updates() -> Result<UpdateInfo, String> {
     let settings = load_update_settings().unwrap_or_default();
     let mut info = check_for_updates_internal(settings.update_channel).await?;
@@ -207,31 +200,7 @@ async fn check_for_updates_internal(channel: UpdateChannel) -> Result<UpdateInfo
         }
     }
 
-    // 2. Try GitHub API
-    match check_github_api_channel(channel).await {
-        Ok(info) => return Ok(info),
-        Err(e) => {
-            logger::log_warn(&format!(
-                "GitHub API ({:?}) check failed: {}. Trying static fallbacks...",
-                channel, e
-            ));
-        }
-    }
-
-    // 3. Try GitHub Raw (only applies to stable/main)
-    if channel == UpdateChannel::Stable {
-        if let Ok(info) = check_static_url(GITHUB_RAW_URL, "GitHub Raw").await {
-            return Ok(info);
-        }
-        if let Ok(info) = check_static_url(JSDELIVR_URL, "jsDelivr").await {
-            return Ok(info);
-        }
-    }
-
-    Err(format!(
-        "Failed to fetch updates for {:?} channel. Please check network/proxy settings.",
-        channel
-    ))
+    check_github_api_channel(channel).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,7 +212,7 @@ struct UpdaterJson {
 
 async fn create_client() -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
-        .user_agent("Antigravity-Manager")
+        .user_agent("DeepGeminiProxy")
         .timeout(std::time::Duration::from_secs(10));
 
     // Load config to check for upstream proxy
@@ -291,6 +260,7 @@ async fn check_updater_json_channel(channel: UpdateChannel) -> Result<UpdateInfo
                         .get(&asset_url)
                         .send()
                         .await
+                        .and_then(reqwest::Response::error_for_status)
                         .map_err(|e| format!("Request failed: {}", e))?;
                     (res, asset_url)
                 } else {
@@ -331,10 +301,7 @@ async fn check_updater_json_channel(channel: UpdateChannel) -> Result<UpdateInfo
         ));
     }
 
-    let download_url = format!(
-        "https://github.com/lbjlaq/Antigravity-Manager/releases/tag/v{}",
-        latest_version
-    );
+    let download_url = format!("{GITHUB_RELEASES_URL}/tag/v{latest_version}");
 
     Ok(UpdateInfo {
         current_version,
@@ -403,14 +370,16 @@ async fn check_github_api_channel(channel: UpdateChannel) -> Result<UpdateInfo, 
                 .await
                 .map_err(|e| format!("Request failed: {}", e))?;
 
-            if !response.status().is_success() {
-                return Err(format!("GitHub API returned status: {}", response.status()));
+            match response.status() {
+                reqwest::StatusCode::NOT_FOUND => None,
+                status if status.is_success() => Some(
+                    response
+                        .json::<GitHubRelease>()
+                        .await
+                        .map_err(|e| format!("Failed to parse release info: {}", e))?,
+                ),
+                status => return Err(format!("GitHub API returned status: {}", status)),
             }
-
-            response
-                .json::<GitHubRelease>()
-                .await
-                .map_err(|e| format!("Failed to parse release info: {}", e))?
         }
         UpdateChannel::Beta => {
             let response = client
@@ -428,18 +397,31 @@ async fn check_github_api_channel(channel: UpdateChannel) -> Result<UpdateInfo, 
                 .await
                 .map_err(|e| format!("Failed to parse releases: {}", e))?;
 
-            // 优先查找最新的 pre-release
-            let latest_pre = releases
-                .into_iter()
-                .find(|r| r.prerelease)
-                .ok_or_else(|| "No pre-release found on GitHub".to_string())?;
-
-            latest_pre
+            releases.into_iter().find(|r| r.prerelease)
         }
     };
 
-    let latest_version = release.tag_name.trim_start_matches('v').to_string();
+    Ok(release_update_info(release, channel))
+}
+
+fn release_update_info(release: Option<GitHubRelease>, channel: UpdateChannel) -> UpdateInfo {
     let current_version = CURRENT_VERSION.to_string();
+    let Some(release) = release else {
+        return UpdateInfo {
+            latest_version: current_version.clone(),
+            current_version,
+            has_update: false,
+            download_url: GITHUB_RELEASES_URL.to_string(),
+            release_notes: String::new(),
+            published_at: String::new(),
+            source: Some(format!("GitHub API ({:?})", channel)),
+            proxy_url: None,
+            channel: Some(channel),
+            updater_json_url: None,
+        };
+    };
+
+    let latest_version = release.tag_name.trim_start_matches('v').to_string();
     let has_update = compare_versions(&latest_version, &current_version);
 
     if has_update {
@@ -454,7 +436,7 @@ async fn check_github_api_channel(channel: UpdateChannel) -> Result<UpdateInfo, 
         ));
     }
 
-    Ok(UpdateInfo {
+    UpdateInfo {
         current_version,
         latest_version,
         has_update,
@@ -466,77 +448,8 @@ async fn check_github_api_channel(channel: UpdateChannel) -> Result<UpdateInfo, 
         source: Some(format!("GitHub API ({:?})", channel)),
         proxy_url: None,
         channel: Some(channel),
-        updater_json_url: match channel {
-            UpdateChannel::Beta => Some(PREVIEW_UPDATER_JSON_URL.to_string()),
-            UpdateChannel::Stable => Some(STABLE_UPDATER_JSON_URL.to_string()),
-        },
-    })
-}
-
-#[derive(Deserialize)]
-struct PackageJson {
-    version: String,
-}
-
-async fn check_static_url(url: &str, source_name: &str) -> Result<UpdateInfo, String> {
-    let client = create_client().await?;
-
-    logger::log_info(&format!("Checking for updates via {}...", source_name));
-
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Request failed: {}", e))?;
-
-    if !response.status().is_success() {
-        return Err(format!(
-            "{} returned status: {}",
-            source_name,
-            response.status()
-        ));
+        updater_json_url: None,
     }
-
-    let package_json: PackageJson = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse package.json: {}", e))?;
-
-    let latest_version = package_json.version;
-    let current_version = CURRENT_VERSION.to_string();
-    let has_update = compare_versions(&latest_version, &current_version);
-
-    if has_update {
-        logger::log_info(&format!(
-            "New version found ({}): {} (Current: {})",
-            source_name, latest_version, current_version
-        ));
-    } else {
-        logger::log_info(&format!(
-            "Up to date ({}): {} (Matches {})",
-            source_name, current_version, latest_version
-        ));
-    }
-
-    // fallback sources generally don't provide release notes or download specific URL, construct generic
-    let download_url = "https://github.com/lbjlaq/Antigravity-Manager/releases/latest".to_string();
-    let release_notes = format!(
-        "New version detected via {}. Please check release page for details.",
-        source_name
-    );
-
-    Ok(UpdateInfo {
-        current_version,
-        latest_version,
-        has_update,
-        download_url,
-        release_notes,
-        published_at: Utc::now().to_rfc3339(), // Approximate time
-        source: Some(source_name.to_string()),
-        proxy_url: None,
-        channel: Some(UpdateChannel::Stable),
-        updater_json_url: Some(STABLE_UPDATER_JSON_URL.to_string()),
-    })
 }
 
 /// Compare two semantic versions (supports pre-release tags like "4.8.1-beta.2" vs "4.8.1-beta.1")
@@ -674,14 +587,13 @@ pub fn update_last_check_time() -> Result<(), String> {
 pub fn is_homebrew_installed() -> bool {
     #[cfg(target_os = "macos")]
     {
-        let caskroom_paths = [
-            "/opt/homebrew/Caskroom/antigravity-tools",
-            "/usr/local/Caskroom/antigravity-tools",
-        ];
-
-        for path in &caskroom_paths {
-            if std::path::Path::new(path).exists() {
-                logger::log_info(&format!("Detected Homebrew Cask installation at: {}", path));
+        for caskroom in ["/opt/homebrew/Caskroom", "/usr/local/Caskroom"] {
+            let path = std::path::Path::new(caskroom).join(HOMEBREW_CASK);
+            if path.exists() {
+                logger::log_info(&format!(
+                    "Detected Homebrew Cask installation at: {}",
+                    path.display()
+                ));
                 return true;
             }
         }
@@ -712,7 +624,7 @@ pub fn is_appimage_running() -> bool {
     }
 }
 
-/// Execute `brew upgrade --cask antigravity-tools` with timeout (macOS only)
+/// Upgrade the DeepGeminiProxy Homebrew Cask (macOS only).
 #[cfg(not(target_os = "macos"))]
 pub async fn brew_upgrade_cask() -> Result<String, String> {
     Err("brew_not_supported".to_string())
@@ -720,7 +632,7 @@ pub async fn brew_upgrade_cask() -> Result<String, String> {
 
 #[cfg(target_os = "macos")]
 pub async fn brew_upgrade_cask() -> Result<String, String> {
-    logger::log_info("Starting Homebrew Cask upgrade for antigravity-tools...");
+    logger::log_info("Starting Homebrew Cask upgrade for DeepGeminiProxy...");
 
     // Find brew binary
     let brew_path = if std::path::Path::new("/opt/homebrew/bin/brew").exists() {
@@ -735,7 +647,7 @@ pub async fn brew_upgrade_cask() -> Result<String, String> {
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(180),
         tokio::process::Command::new(brew_path)
-            .args(["upgrade", "--cask", "antigravity-tools"])
+            .args(["upgrade", "--cask", HOMEBREW_CASK])
             .output(),
     )
     .await;
@@ -790,6 +702,44 @@ mod tests {
         assert!(compare_versions("4.8.1", "4.8.1-beta.2")); // 正式版 > 预发布版
         assert!(!compare_versions("4.8.1-beta.2", "4.8.1"));
         assert!(compare_versions("4.8.2-beta.1", "4.8.1"));
+    }
+
+    #[test]
+    fn test_tauri_default_endpoint_matches_stable_channel() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        assert_eq!(
+            config["plugins"]["updater"]["endpoints"],
+            serde_json::json!([STABLE_UPDATER_JSON_URL])
+        );
+    }
+
+    #[test]
+    fn test_release_without_manifest_is_manual_only() {
+        let release = GitHubRelease {
+            tag_name: "v999.0.0-beta.1".to_string(),
+            html_url: "https://example.test/releases/tag/v999.0.0-beta.1".to_string(),
+            body: None,
+            published_at: None,
+            prerelease: true,
+            assets: Vec::new(),
+        };
+        let download_url = release.html_url.clone();
+        let info = release_update_info(Some(release), UpdateChannel::Beta);
+        assert!(info.has_update);
+        assert_eq!(info.channel, Some(UpdateChannel::Beta));
+        assert_eq!(info.download_url, download_url);
+        assert!(info.updater_json_url.is_none());
+    }
+
+    #[test]
+    fn test_no_published_release_means_no_update() {
+        for channel in [UpdateChannel::Stable, UpdateChannel::Beta] {
+            let info = release_update_info(None, channel);
+            assert!(!info.has_update);
+            assert_eq!(info.latest_version, info.current_version);
+            assert!(info.updater_json_url.is_none());
+        }
     }
 
     #[test]

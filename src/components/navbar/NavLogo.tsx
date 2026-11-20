@@ -4,20 +4,21 @@ import LogoIcon from '../../../src-tauri/icons/icon.png';
 
 export function NavLogo() {
     const { t } = useTranslation();
+    const appName = t('common.app_name', 'DeepGeminiProxy');
 
     return (
-        <Link to="/" draggable="false" className="flex w-full min-w-0 items-center gap-2 text-xl font-semibold text-gray-900 dark:text-base-content">
-            <div className="relative flex items-center justify-center">
+        <Link to="/" aria-label={appName} draggable="false" className="flex w-full min-w-0 items-center gap-2 text-lg font-semibold tracking-tight text-gray-900 dark:text-base-content">
+            <div className="relative flex shrink-0 items-center justify-center">
                 <img
                     src={LogoIcon}
-                    alt="Logo"
+                    alt=""
                     className="w-8 h-8 cursor-pointer active:scale-95 transition-transform relative z-10"
                     draggable="false"
                 />
             </div>
 
             {/* 父容器宽度 < 200px 隐藏 */}
-            <span className="hidden @[200px]/logo:inline text-nowrap">{t('common.app_name', 'Antigravity Tools')}</span>
+            <span className="hidden min-w-0 truncate @[200px]/logo:block">{appName}</span>
         </Link>
     );
 }

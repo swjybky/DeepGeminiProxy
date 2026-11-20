@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { X, Sparkles, Loader2, CheckCircle, RotateCcw } from 'lucide-react';
 import { request as invoke } from '../utils/request';
 import { useTranslation } from 'react-i18next';
-import { Update, check as tauriCheck } from '@tauri-apps/plugin-updater';
+import { Update } from '@tauri-apps/plugin-updater';
 import { relaunch as tauriRelaunch } from '@tauri-apps/plugin-process';
 import { isTauri } from '../utils/env';
 import { showToast } from './common/ToastContainer';
@@ -74,19 +74,18 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({ onClose 
       setTimeout(() => setIsVisible(true), 100);
 
       let update: Update | null = null;
-      try {
-        const metadata = await invoke<any>('check_native_update', {
-          endpoint: info.updater_json_url,
-          proxy: info.proxy_url,
-        });
-        if (metadata) {
-          update = new Update(metadata);
+      if (info.updater_json_url) {
+        try {
+          const metadata = await invoke<any>('check_native_update', {
+            endpoint: info.updater_json_url,
+            proxy: info.proxy_url,
+          });
+          if (metadata) {
+            update = new Update(metadata);
+          }
+        } catch (err) {
+          console.warn('Native update check failed for the selected channel:', err);
         }
-      } catch (err) {
-        console.warn('Native update check via command failed, trying fallback plugin check:', err);
-        update = await tauriCheck(
-          info.proxy_url ? { proxy: info.proxy_url } : undefined
-        );
       }
 
       if (!update) {

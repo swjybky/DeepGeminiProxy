@@ -71,13 +71,14 @@
         "selected": "Selected",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "Sao chép vào khay nhớ tạm"
     },
     "nav": {
         "dashboard": "Tổng quan",
         "accounts": "Tài khoản",
         "proxy": "API Proxy",
+        "agent_tools": "Công cụ Agent",
         "token_stats": "Thống kê",
         "call_records": "Nhật ký lưu lượng",
         "security": "Quản lý IP",
@@ -108,7 +109,6 @@
         "switch_to_malay_short": "MY",
         "user_token": "Token người dùng",
         "security_logs": "IP Logs",
-        "apikey_fun": "Transit Station",
         "logout": "Logout",
         "more": "More",
         "mini_view": "Mini View"
@@ -525,7 +525,7 @@
             "auto_launch": "Mở khi đăng nhập",
             "auto_launch_enabled": "Đã bật",
             "auto_launch_disabled": "Đã tắt",
-            "auto_launch_desc": "Tự động mở Antigravity Tools khi bạn đăng nhập vào máy",
+            "auto_launch_desc": "Tự động mở DeepGeminiProxy khi bạn đăng nhập vào máy",
             "quiet_autostart": "Khởi động im lặng (ở trong khay)",
             "quiet_autostart_desc": "Khi được mở cùng hệ thống, cửa sổ chính được giữ ẩn. Nếu chế độ nhẹ cũng bật, WebView được giải phóng ngay. Tự mở ứng dụng vẫn hiện cửa sổ. Nếu không có khay hệ thống, cửa sổ sẽ được hiện.",
             "quiet_autostart_enabled": "Đã bật khởi động im lặng",
@@ -885,6 +885,15 @@
             "allow_lan_access_restart_hint": "ℹ️ Cần khởi động lại dịch vụ để áp dụng thay đổi",
             "api_key": "API Key",
             "api_key_tooltip": "Khóa bí mật dùng chung (Shared secret) để clients xác thực. Bấm tạo mới sẽ làm khóa cũ mất hiệu lực ngay lập tức.",
+            "model_base_url": {
+                "label": "URL cơ sở của mô hình",
+                "protocol": "Giao thức API",
+                "address_type": "Loại địa chỉ",
+                "local": "Máy này",
+                "lan": "Mạng LAN",
+                "lan_unavailable": "Không tìm thấy địa chỉ LAN",
+                "lan_hint": "Để kết nối từ thiết bị khác, hãy bật quyền truy cập LAN và khởi động lại dịch vụ."
+            },
             "btn_regenerate": "Tạo mới Key",
             "btn_copy": "Sao chép",
             "btn_copied": "Đã chép",
@@ -2268,49 +2277,6 @@
         "records_unit": "bản ghi",
         "no_trend_data": "Không có dữ liệu xu hướng trong khoảng thời gian này",
         "no_model_data": "Không có dữ liệu mô hình"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN Hub",
-        "eyebrow": "Hub",
-        "description": "The official Antigravity Tools API Hub, providing stable, open, and cost-effective large model API services. Supports mainstream models like Claude, OpenAI, and Gemini. Ideal for unified configuration in Codex, Gemini CLI, Claude Code, and other development tools.",
-        "viewNow": "View Now",
-        "usage": {
-            "remainingAmount": "Remaining",
-            "usedAmount": "Used",
-            "todayRequests": "Today's Requests",
-            "todayTokens": "Today's Tokens",
-            "totalRequests": "Total Requests",
-            "totalTokens": "Total Tokens"
-        },
-        "keyManager": {
-            "title": "Key Management",
-            "desc": "Save frequently used API Keys. Click to switch and query balance automatically.",
-            "lastRemainingLabel": "Last Balance",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Not queried",
-            "addedAt": "Added at",
-            "empty": "No saved keys."
-        },
-        "queryTitle": "Key Quota Query",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Paste your API Key...",
-        "queryButton": "Refresh",
-        "cli": {
-            "quickConfig": "One-Click Local Dev Setup",
-            "syncDesc": "Sync to official standard configuration",
-            "codexTooltip": "Sync API Key & BaseURL to Antigravity Codex",
-            "claudeTooltip": "Sync API Key & BaseURL to Claude Code",
-            "opencodeTooltip": "Đồng bộ API Key, BaseURL và models sang OpenCode"
-        },
-        "models": {
-            "title": "Available Models",
-            "empty": "No models returned for current API Key."
-        },
-        "errors": {
-            "parseFormat": "Parse format error: {{err}}",
-            "fetchFailed": "Fetch failed: {{err}}",
-            "queryFailed": "Failed to get valid quota or models. Please check if the API Key and Base URL are correct."
-        }
     },
     "errors": {
         "stream": {

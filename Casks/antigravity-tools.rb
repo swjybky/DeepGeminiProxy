@@ -1,25 +1,19 @@
 cask "antigravity-tools" do
-  version "5.0.3"
+  version "1.0.0"
   sha256 :no_check
 
-  name "Antigravity Tools"
+  name "DeepGeminiProxy"
   desc "Professional Account Management for AI Services"
-  homepage "https://github.com/lbjlaq/Antigravity-Manager"
+  homepage "https://github.com/swjybky/DeepGeminiProxy"
 
   on_macos do
     arch intel: "x64", arm: "aarch64"
 
-    url "https://github.com/lbjlaq/Antigravity-Manager/releases/download/v#{version}/Antigravity.Tools_#{version}_#{arch}.dmg"
+    url "https://github.com/swjybky/DeepGeminiProxy/releases/download/v#{version}/DeepGeminiProxy_#{version}_#{arch}.dmg"
 
-    app "Antigravity Tools.app"
-    binary "#{appdir}/Antigravity Tools.app/Contents/MacOS/antigravity-tools"
-    binary "#{appdir}/Antigravity Tools.app/Contents/MacOS/antigravity-tools", target: "at"
-
-    postflight_steps do
-      run "/usr/bin/xattr",
-          args:         ["-rd", "com.apple.quarantine", "{{appdir}}/Antigravity Tools.app"],
-          must_succeed: false
-    end
+    app "DeepGeminiProxy.app"
+    binary "#{appdir}/DeepGeminiProxy.app/Contents/MacOS/antigravity-tools"
+    binary "#{appdir}/DeepGeminiProxy.app/Contents/MacOS/antigravity-tools", target: "at"
 
     zap trash: [
       "~/Library/Application Support/com.lbjlaq.antigravity-tools",
@@ -32,11 +26,11 @@ cask "antigravity-tools" do
   on_linux do
     arch arm: "aarch64", intel: "amd64"
 
-    url "https://github.com/lbjlaq/Antigravity-Manager/releases/download/v#{version}/Antigravity.Tools_#{version}_#{arch}.AppImage"
-    binary "Antigravity.Tools_#{version}_#{arch}.AppImage", target: "antigravity-tools"
+    url "https://github.com/swjybky/DeepGeminiProxy/releases/download/v#{version}/DeepGeminiProxy_#{version}_#{arch}.AppImage"
+    binary "DeepGeminiProxy_#{version}_#{arch}.AppImage", target: "antigravity-tools"
 
     preflight_steps do
-      set_permissions "Antigravity.Tools_{{version}}_{{arch}}.AppImage", "0755"
+      set_permissions "DeepGeminiProxy_{{version}}_{{arch}}.AppImage", "0755"
     end
   end
 end

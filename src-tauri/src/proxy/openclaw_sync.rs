@@ -484,10 +484,7 @@ pub fn sync_openclaw_provider(
 
         let mut next_allow: Vec<Value> = allow_arr
             .into_iter()
-            .filter(|v| {
-                v.as_str()
-                    .is_some_and(|s| !s.starts_with(&format!("{PROVIDER_ID}/")) && s != allow_entry)
-            })
+            .filter(|value| !value.as_str().is_some_and(is_managed_provider))
             .collect();
         next_allow.push(json!(allow_entry));
         config["agents"]["defaults"]["modelPolicy"]["allow"] = json!(next_allow);
@@ -560,17 +557,17 @@ pub fn clear_openclaw_config() -> Result<(), String> {
     }
 
     // 3. 清理 agents.defaults.modelPolicy.allow
-    if let Some(allow) = config
-        .get_mut("agents")
-        .and_then(|a| a.get_mut("defaults"))
-        .and_then(|d| d.get_mut("modelPolicy"))
-        .and_then(|p| p.get_mut("allow"))
-        .and_then(|v| v.as_array_mut())
+    if let Some(policy) = config
+        .pointer_mut("/agents/defaults/modelPolicy")
+        .and_then(Value::as_object_mut)
     {
-        allow.retain(|v| {
-            v.as_str()
-                .is_some_and(|s| s != format!("{PROVIDER_ID}/*") && !is_managed_provider(s))
-        });
+        if let Some(allow) = policy.get_mut("allow").and_then(Value::as_array_mut) {
+            let previous_count = allow.len();
+            allow.retain(|value| !value.as_str().is_some_and(is_managed_provider));
+            if previous_count > 0 && allow.is_empty() {
+                policy.remove("allow");
+            }
+        }
     }
 
     // 4. 若主模型指向 antigravity-manager，则清理

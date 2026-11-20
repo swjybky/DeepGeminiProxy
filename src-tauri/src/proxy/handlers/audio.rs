@@ -8,7 +8,11 @@ use serde_json::{json, Value};
 use tracing::{debug, info};
 use uuid::Uuid;
 
-use crate::proxy::{audio::AudioProcessor, server::AppState};
+use crate::proxy::{
+    audio::AudioProcessor,
+    common::model_gate::{is_model_enabled, MODEL_NOT_EXIST},
+    server::AppState,
+};
 
 /// 处理音频转录请求 (OpenAI Whisper API 兼容)
 pub async fn handle_audio_transcription(
@@ -47,6 +51,10 @@ pub async fn handle_audio_transcription(
             }
             _ => {}
         }
+    }
+
+    if !is_model_enabled(state.enabled_models.read().await.as_deref(), &model) {
+        return Err((StatusCode::NOT_FOUND, MODEL_NOT_EXIST.to_string()));
     }
 
     let audio_bytes = audio_data.ok_or((StatusCode::BAD_REQUEST, "缺少音频文件".to_string()))?;

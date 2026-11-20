@@ -70,13 +70,14 @@
         "selected": "已选择",
         "claude_series": "Claude 系列",
         "maximize": "最大化",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "复制到剪贴板"
     },
     "nav": {
         "dashboard": "仪表盘",
         "accounts": "账号管理",
         "proxy": "API 反代",
+        "agent_tools": "Agent 工具",
         "call_records": "流量日志",
         "token_stats": "Token 统计",
         "security": "IP 管理",
@@ -107,7 +108,6 @@
         "switch_to_malay": "切换到马来语",
         "switch_to_malay_short": "MY",
         "user_token": "用户 Token",
-        "apikey_fun": "中转站",
         "logout": "登出",
         "more": "更多",
         "mini_view": "迷你悬浮窗"
@@ -263,6 +263,12 @@
         "pro": "PRO",
         "free": "FREE",
         "edit_label": "编辑标签",
+        "activation": {
+            "title": "用此账号启动 Antigravity",
+            "current_account": "已登录此账号",
+            "signed_in_as": "当前登录 {{email}}",
+            "no_account": "未检测到登录账号"
+        },
         "custom_label_placeholder": "输入自定义标签",
         "label_updated": "标签已更新",
         "priority": "优先级",
@@ -539,7 +545,7 @@
             "auto_launch": "开机自动启动",
             "auto_launch_enabled": "启用",
             "auto_launch_disabled": "禁用",
-            "auto_launch_desc": "系统启动时自动运行 Antigravity Tools",
+            "auto_launch_desc": "系统启动时自动运行 DeepGeminiProxy",
             "quiet_autostart": "免打扰启动（留在托盘）",
             "quiet_autostart_desc": "开机自启时不弹出主窗口。同时开启轻量模式时，会直接释放前端进程。手动打开软件仍会显示主窗口；系统没有托盘时会改为显示窗口。",
             "quiet_autostart_enabled": "已开启免打扰启动",
@@ -900,6 +906,17 @@
             "port_hint": "默认 8045，修改端口需重启服务",
             "auto_start": "跟随应用自动启动",
             "auto_start_tooltip": "应用启动时自动启动本地 API 代理服务。",
+            "enabled_models": {
+                "title": "启用模型",
+                "fetch": "拉取模型列表",
+                "enable_all": "全部启用",
+                "disable_all": "全部禁用",
+                "all_enabled": "默认启用全部模型，包括之后新增的模型。",
+                "selected": "已启用 {{count}} 个模型",
+                "unsaved": "点击上方「保存」应用模型选择。",
+                "fetch_failed": "拉取模型列表失败：{{error}}",
+                "empty": "当前没有可用模型。"
+            },
             "allow_lan_access": "允许局域网访问",
             "allow_lan_access_tooltip": "开启后绑定到 IPv6/IPv4 双栈通配地址（[::] / 0.0.0.0），局域网及公网其他设备均可访问。建议同时开启鉴权并妥善保管 API 密钥；修改后需重启服务生效。",
             "allow_lan_access_hint_enabled": "🌐 监听 [::] / 0.0.0.0 (IPv6/IPv4 双栈)，局域网与外部设备可访问",
@@ -908,6 +925,15 @@
             "allow_lan_access_restart_hint": "ℹ️ 需要重启服务后生效",
             "api_key": "API 密钥",
             "api_key_tooltip": "启用鉴权后，客户端访问代理所需的共享密钥。重新生成会立即使旧密钥失效。",
+            "model_base_url": {
+                "label": "模型 Base URL",
+                "protocol": "API 协议",
+                "address_type": "地址类型",
+                "local": "本机",
+                "lan": "局域网",
+                "lan_unavailable": "未检测到局域网地址",
+                "lan_hint": "其他设备连接前，请确认已启用「允许局域网访问」并重启服务。"
+            },
             "btn_regenerate": "重新生成密钥",
             "btn_edit": "编辑",
             "btn_save": "保存",
@@ -1584,17 +1610,24 @@
             "rate_limited": "限流"
         },
         "cli_sync": {
+            "integration": {
+                "title": "Agent 接入",
+                "deepwrite_hint": "先完全退出 DeepWrite（⌘Q）。开启后，Gemini 模型将出现在自定义模型的 DeepGemini 分组中。",
+                "description": "打开开关，自动配置网关地址、密钥和模型。",
+                "connection_changed": "连接配置已变更",
+                "key_required": "请先设置网关 API 密钥，再开启 Agent 接入。",
+                "gateway_stopped": "网关未启动。启动后，已接入的工具即可连接。",
+                "connected": "已接入",
+                "disconnected": "未接入",
+                "status_error": "配置检测失败",
+                "switch": "将 {{name}} 接入网关",
+                "disconnect_title": "断开网关",
+                "restore_message": "要断开 {{name}} 并恢复备份或默认配置吗？这可能覆盖接入后对相关文件的修改。",
+                "error": "接入配置更新失败（{{error}}）"
+            },
             "title": "Agent工具一键配置",
             "subtitle": "快速将当前 API 服务地址与 API 密钥同步到本地 AI Agent 工具中",
             "card_title": "{{name}} 配置",
-            "jeikcode_recommended": "推荐使用",
-            "jeikcode_badge": "Best Matched",
-            "jeikcode_author": "by Jeikl",
-            "jeikcode_tagline": "核心维护者深度打造 · 原生网关最佳兼容",
-            "jeikcode_tag_cache": "95%+ 恐怖缓存",
-            "jeikcode_tag_codegraph": "代码图谱",
-            "jeikcode_tag_surpass": "超越 CC / Codex",
-            "jeikcode_tag_custom": "自由定制",
             "status": {
                 "not_installed": "未检测到安装",
                 "installed": "v{{version}}",
@@ -2348,66 +2381,6 @@
         "records_unit": "个记录",
         "no_trend_data": "该时段内暂无走势数据",
         "no_model_data": "暂无模型数据"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN 中转站",
-        "eyebrow": "中转站",
-        "double11Badge": "双 11 特惠中",
-        "description": "Antigravity Tools 官方合作中转站，为用户提供稳定、开放、高性价比的大模型 API 接入服务。支持 Claude、OpenAI、Gemini 等主流模型，适合在 Codex、Gemini CLI、Claude Code 及其他开发工具中统一配置使用。通过 Antigravity Tools 专属链接注册，可享受最高充值永久 95 折优惠。",
-        "viewNow": "立即查看",
-        "usage": {
-            "remainingAmount": "剩余额度",
-            "usedAmount": "已用额度",
-            "todayRequests": "今日请求",
-            "todayTokens": "今日 Token",
-            "totalRequests": "总请求",
-            "totalTokens": "总 Token"
-        },
-        "keyManager": {
-            "title": "密钥管理",
-            "desc": "保存常用 API Key，点击即可切换并自动查询额度。",
-            "lastRemainingLabel": "上次余额",
-            "lastRemaining": "${{value}}",
-            "notQueried": "未查询",
-            "addedAt": "添加于",
-            "empty": "暂无保存的密钥。"
-        },
-        "queryTitle": "密钥额度查询",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "粘贴你的 API Key...",
-        "queryButton": "刷新",
-        "cli": {
-            "quickConfig": "一键配置本地开发环境",
-            "syncDesc": "同步至官方标准配置",
-            "codexTooltip": "将 API Key 与 BaseURL 同步至 Codex / ChatGPT CLI",
-            "claudeTooltip": "将 API Key 与 BaseURL 同步至 Claude Code",
-            "opencodeTooltip": "将 API Key、BaseURL 和模型同步至 OpenCode"
-        },
-        "models": {
-            "title": "可用模型",
-            "empty": "输入 API Key 并查询以获取可用模型列表。",
-            "emptyFromKey": "暂未获取到模型。请点击刷新以获取模型列表。"
-        },
-        "errors": {
-            "parseFormat": "解析格式异常: {{err}}",
-            "fetchFailed": "获取失败: {{err}}",
-            "queryFailed": "无法获取有效的额度数据或模型列表，请确认 API Key 是否有效，以及接口地址是否正确。"
-        },
-        "opencode": {
-            "modelsRequired": "请先刷新此密钥以加载可用模型，再激活其 OpenCode 配置。",
-            "active": "已同步",
-            "modified": "有差异",
-            "inactive": "未激活",
-            "syncedToast": "已同步至 OpenCode: {{name}}",
-            "removedToast": "已从 OpenCode 移除配置 {{name}}",
-            "clickToRemove": "OpenCode 配置已激活且一致。点击取消激活（移除配置）",
-            "clickToUpdate": "设置或模型存在差异。点击更新",
-            "clickToActivate": "点击以在 OpenCode 中激活独立配置",
-            "syncedActiveTooltip": "OpenCode: 配置完全匹配（已激活）。点击取消激活/移除",
-            "partialTooltip": "OpenCode: 设置或模型存在差异。点击更新"
-        },
-        "syncSuccess": "成功同步至 {{app}}",
-        "syncError": "同步失败: {{error}}"
     },
     "suggestion_delete_thinking": {
         "title": "版本更新提示",

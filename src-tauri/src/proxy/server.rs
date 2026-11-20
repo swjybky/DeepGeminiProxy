@@ -11,6 +11,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
+use std::net::{Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::{Arc, Mutex, OnceLock};
 use tokio::sync::{watch, RwLock};
 use tracing::{debug, error};
@@ -107,6 +108,7 @@ pub struct AppState {
     pub proxy_pool_state: Arc<tokio::sync::RwLock<crate::proxy::config::ProxyPoolConfig>>, // [FIX Web Mode]
     pub proxy_pool_manager: Arc<crate::proxy::proxy_pool::ProxyPoolManager>, // [FIX Web Mode]
     pub only_raw_quota_models: Arc<tokio::sync::RwLock<bool>>, // [NEW] 是否只暴露真实配额模型
+    pub enabled_models: Arc<RwLock<Option<Vec<String>>>>,
     pub image_scheduler: Arc<ImageScheduler>,
 }
 
@@ -423,6 +425,7 @@ fn to_account_response(
 #[derive(Clone)]
 pub struct AxumServer {
     cancel_token: tokio_util::sync::CancellationToken,
+    pub(crate) port: u16,
     custom_mapping: Arc<tokio::sync::RwLock<std::collections::HashMap<String, String>>>,
     proxy_state: Arc<tokio::sync::RwLock<crate::proxy::config::UpstreamProxyConfig>>,
     upstream: Arc<crate::proxy::upstream::client::UpstreamClient>,
@@ -436,13 +439,28 @@ pub struct AxumServer {
     pub proxy_pool_state: Arc<tokio::sync::RwLock<crate::proxy::config::ProxyPoolConfig>>, // [NEW] 代理池配置状态
     pub proxy_pool_manager: Arc<crate::proxy::proxy_pool::ProxyPoolManager>, // [NEW] 暴露代理池管理器供命令调用
     pub only_raw_quota_models: Arc<tokio::sync::RwLock<bool>>,
+    enabled_models: Arc<RwLock<Option<Vec<String>>>>,
 }
 
 impl AxumServer {
-    pub async fn update_only_raw_quota_models(&self, only_raw: bool) {
-        let mut r = self.only_raw_quota_models.write().await;
-        *r = only_raw;
-        tracing::debug!("only_raw_quota_models 已更新: {}", only_raw);
+    #[cfg(target_os = "macos")]
+    pub(crate) async fn integration_api_key(&self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(self.security_state.read().await.api_key.clone())
+    }
+
+    pub async fn update_model_listing(&self, config: &crate::proxy::config::ProxyConfig) {
+        *self.only_raw_quota_models.write().await = config.only_raw_quota_models;
+        *self.enabled_models.write().await = config.enabled_models.clone();
+    }
+
+    pub async fn model_catalog(&self) -> Vec<String> {
+        let only_raw = *self.only_raw_quota_models.read().await;
+        crate::proxy::common::model_mapping::get_all_dynamic_models(
+            &self.custom_mapping,
+            Some(&self.token_manager),
+            only_raw,
+        )
+        .await
     }
 
     pub async fn update_mapping(&self, config: &crate::proxy::config::ProxyConfig) {
@@ -536,6 +554,7 @@ impl AxumServer {
         cloudflared_state: Arc<crate::commands::cloudflared::CloudflaredState>,
         proxy_pool_config: crate::proxy::config::ProxyPoolConfig, // [NEW]
         only_raw_quota_models: bool,
+        enabled_models: Option<Vec<String>>,
         image_scheduler_config: crate::proxy::config::ImageSchedulerConfig,
     ) -> Result<(Self, tokio::task::JoinHandle<()>), String> {
         let custom_mapping_state = Arc::new(tokio::sync::RwLock::new(custom_mapping));
@@ -556,6 +575,7 @@ impl AxumServer {
         let is_running_state = Arc::new(RwLock::new(false));
 
         let only_raw_quota_models_state = Arc::new(tokio::sync::RwLock::new(only_raw_quota_models));
+        let enabled_models_state = Arc::new(RwLock::new(enabled_models));
         let image_account_ids = token_manager.enabled_account_ids();
         let image_account_count = image_account_ids.len();
         let image_scheduler = build_image_scheduler(
@@ -570,6 +590,9 @@ impl AxumServer {
             "Image scheduler initialized"
         );
 
+        // Keep the bound port for status reporting, including auto-assigned ports.
+        let listener = bind_tcp_listener(&host, port)?;
+        let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let state = AppState {
             token_manager: token_manager.clone(),
             custom_mapping: custom_mapping_state.clone(),
@@ -604,6 +627,7 @@ impl AxumServer {
             proxy_pool_state: proxy_pool_state.clone(),
             proxy_pool_manager: proxy_pool_manager.clone(),
             only_raw_quota_models: only_raw_quota_models_state.clone(),
+            enabled_models: enabled_models_state.clone(),
             image_scheduler,
         };
 
@@ -754,6 +778,10 @@ impl AxumServer {
                 get(admin_list_accounts).post(admin_add_account),
             )
             .route("/accounts/current", get(admin_get_current_account))
+            .route(
+                "/accounts/active-clients",
+                get(admin_get_active_clients_status),
+            )
             .route("/accounts/switch", post(admin_switch_account))
             .route("/accounts/refresh", post(admin_refresh_all_quotas))
             .route("/accounts/:accountId", delete(admin_delete_account))
@@ -809,19 +837,7 @@ impl AxumServer {
                 "/proxy/opencode/status",
                 post(admin_get_opencode_sync_status),
             )
-            .route(
-                "/proxy/opencode/providers",
-                get(admin_get_opencode_providers),
-            )
             .route("/proxy/opencode/sync", post(admin_execute_opencode_sync))
-            .route(
-                "/proxy/opencode/openai-sync",
-                post(admin_execute_opencode_openai_sync),
-            )
-            .route(
-                "/proxy/opencode/remove-provider",
-                post(admin_execute_opencode_remove_provider),
-            )
             .route(
                 "/proxy/opencode/restore",
                 post(admin_execute_opencode_restore),
@@ -859,6 +875,7 @@ impl AxumServer {
             .route("/proxy/droid/restore", post(admin_execute_droid_restore))
             .route("/proxy/droid/config", post(admin_get_droid_config_content))
             .route("/proxy/status", get(admin_get_proxy_status))
+            .route("/proxy/model-catalog", get(admin_get_proxy_model_catalog))
             .route("/proxy/pool/config", get(admin_get_proxy_pool_config))
             .route("/proxy/pool/bindings", get(admin_get_all_account_bindings))
             .route("/proxy/pool/bind", post(admin_bind_account_proxy))
@@ -1118,8 +1135,6 @@ impl AxumServer {
             app
         };
 
-        // 绑定地址（使用 socket2 开启 SO_REUSEADDR，通配地址自动开启 IPv6/IPv4 双栈支持）
-        let listener = bind_tcp_listener(&host, port)?;
         let display_host = if host == "0.0.0.0" || host == "::" || host == "[::]" {
             "0.0.0.0 / [::] (IPv4/IPv6 Dual-Stack)".to_string()
         } else if host.contains(':') && !host.starts_with('[') {
@@ -1134,6 +1149,7 @@ impl AxumServer {
 
         let server_instance = Self {
             cancel_token: cancel_token.clone(),
+            port,
             custom_mapping: custom_mapping_state.clone(),
             proxy_state,
             upstream: state.upstream.clone(),
@@ -1146,6 +1162,7 @@ impl AxumServer {
             proxy_pool_state,
             proxy_pool_manager,
             only_raw_quota_models: only_raw_quota_models_state,
+            enabled_models: enabled_models_state,
         };
 
         let server_cancel_token = cancel_token.clone();
@@ -1483,6 +1500,19 @@ async fn admin_export_accounts(
     })?;
 
     Ok(Json(response))
+}
+
+async fn admin_get_active_clients_status(
+) -> Result<Json<crate::models::ActiveClientsStatus>, (StatusCode, Json<ErrorResponse>)> {
+    crate::commands::get_active_clients_status()
+        .await
+        .map(Json)
+        .map_err(|error| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error }),
+            )
+        })
 }
 
 async fn admin_get_current_account(
@@ -1999,6 +2029,7 @@ async fn admin_save_config(
         let mut only_raw = state.only_raw_quota_models.write().await;
         *only_raw = new_config.proxy.only_raw_quota_models;
     }
+    *state.enabled_models.write().await = new_config.proxy.enabled_models.clone();
 
     // 更新上游代理
     {
@@ -2167,6 +2198,18 @@ async fn admin_trigger_proxy_health_check(
     })))
 }
 
+pub(crate) fn detect_lan_ipv4() -> Option<Ipv4Addr> {
+    // Ask the OS for the default route's source address without sending any packets.
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    socket.connect((Ipv4Addr::new(192, 0, 2, 1), 9)).ok()?;
+    match socket.local_addr().ok()? {
+        SocketAddr::V4(addr) if !addr.ip().is_loopback() && !addr.ip().is_unspecified() => {
+            Some(*addr.ip())
+        }
+        _ => None,
+    }
+}
+
 async fn admin_get_proxy_status(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
@@ -2178,8 +2221,21 @@ async fn admin_get_proxy_status(
         "running": is_running,
         "port": state.port,
         "base_url": format!("http://127.0.0.1:{}", state.port),
+        "lan_ip": detect_lan_ipv4(),
         "active_accounts": active_accounts,
     })))
+}
+
+async fn admin_get_proxy_model_catalog(State(state): State<AppState>) -> Json<Vec<String>> {
+    let only_raw = *state.only_raw_quota_models.read().await;
+    Json(
+        crate::proxy::common::model_mapping::get_all_dynamic_models(
+            &state.custom_mapping,
+            Some(&state.token_manager),
+            only_raw,
+        )
+        .await,
+    )
 }
 
 async fn admin_start_proxy_service(State(state): State<AppState>) -> impl IntoResponse {
@@ -3907,6 +3963,7 @@ struct CliSyncRequest {
     proxy_url: String,
     api_key: String,
     pub model: Option<String>,
+    integration: Option<bool>,
 }
 
 async fn admin_execute_cli_sync(
@@ -3917,6 +3974,7 @@ async fn admin_execute_cli_sync(
         payload.proxy_url,
         payload.api_key,
         payload.model,
+        payload.integration,
     )
     .await
     .map(|_| StatusCode::OK)
@@ -4641,75 +4699,6 @@ async fn admin_execute_opencode_sync(
     })
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpencodeOpenaiSyncRequest {
-    proxy_url: String,
-    api_key: String,
-    #[serde(default)]
-    provider_id: Option<String>,
-    #[serde(default)]
-    provider_name: Option<String>,
-    models: Option<Vec<crate::proxy::opencode_sync::ModelInput>>,
-}
-
-async fn admin_execute_opencode_openai_sync(
-    Json(payload): Json<OpencodeOpenaiSyncRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::opencode_sync::execute_opencode_openai_sync(
-        payload.proxy_url,
-        payload.api_key,
-        payload.provider_id,
-        payload.provider_name,
-        payload.models,
-    )
-    .await
-    .map(|_| StatusCode::OK)
-    .map_err(|e| {
-        let status = if crate::proxy::opencode_sync::is_provider_validation_error(&e) {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        };
-        (status, Json(ErrorResponse { error: e }))
-    })
-}
-
-async fn admin_get_opencode_providers(
-) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::opencode_sync::get_opencode_providers()
-        .await
-        .map(Json)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct OpencodeRemoveProviderRequest {
-    provider_id: String,
-}
-
-async fn admin_execute_opencode_remove_provider(
-    Json(payload): Json<OpencodeRemoveProviderRequest>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::opencode_sync::execute_opencode_remove_provider(payload.provider_id)
-        .await
-        .map(|_| StatusCode::OK)
-        .map_err(|e| {
-            let status = if crate::proxy::opencode_sync::is_provider_validation_error(&e) {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (status, Json(ErrorResponse { error: e }))
-        })
-}
-
 async fn admin_execute_opencode_restore(
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
     crate::proxy::opencode_sync::execute_opencode_restore()
@@ -4759,20 +4748,25 @@ async fn admin_get_opencode_config_content(
 struct OpencodeClearRequest {
     proxy_url: Option<String>,
     clear_legacy: Option<bool>,
+    provider_only: Option<bool>,
 }
 
 async fn admin_execute_opencode_clear(
     Json(payload): Json<OpencodeClearRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::opencode_sync::execute_opencode_clear(payload.proxy_url, payload.clear_legacy)
-        .await
-        .map(|_| StatusCode::OK)
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse { error: e }),
-            )
-        })
+    crate::proxy::opencode_sync::execute_opencode_clear(
+        payload.proxy_url,
+        payload.clear_legacy,
+        payload.provider_only,
+    )
+    .await
+    .map(|_| StatusCode::OK)
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: e }),
+        )
+    })
 }
 
 // ── Hermes Agent Sync Admin Handlers ──
@@ -5000,12 +4994,13 @@ async fn admin_get_droid_sync_status(
 #[serde(rename_all = "camelCase")]
 struct DroidSyncRequest {
     custom_models: Vec<serde_json::Value>,
+    managed_only: Option<bool>,
 }
 
 async fn admin_execute_droid_sync(
     Json(payload): Json<DroidSyncRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::droid_sync::execute_droid_sync(payload.custom_models)
+    crate::proxy::droid_sync::execute_droid_sync(payload.custom_models, payload.managed_only)
         .await
         .map(|count| Json(serde_json::json!({ "added": count })))
         .map_err(|e| {

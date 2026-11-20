@@ -58,7 +58,7 @@
         "show_parsed": "Exibir Formatado",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "deselect_all": "Deselect All",
         "select_all": "Select All",
         "optional": "Optional",
@@ -79,6 +79,7 @@
         "dashboard": "Painel",
         "accounts": "Contas",
         "proxy": "Proxy da API",
+        "agent_tools": "Ferramentas de agentes",
         "call_records": "Registros de Tráfego",
         "token_stats": "Estatísticas de Tokens",
         "security": "Gestão de IP",
@@ -109,7 +110,6 @@
         "switch_to_malay": "Alternar para Malaio",
         "switch_to_malay_short": "MY",
         "user_token": "Tokens de usuário",
-        "apikey_fun": "ApiKey.fun",
         "logout": "Sair",
         "more": "More",
         "mini_view": "Mini View"
@@ -529,7 +529,7 @@
             "auto_launch": "Iniciar na Inicialização",
             "auto_launch_enabled": "Habilitado",
             "auto_launch_disabled": "Desabilitado",
-            "auto_launch_desc": "Iniciar automaticamente o Antigravity Tools quando o sistema iniciar",
+            "auto_launch_desc": "Iniciar automaticamente o DeepGeminiProxy quando o sistema iniciar",
             "quiet_autostart": "Inicialização silenciosa (permanecer na bandeja)",
             "quiet_autostart_desc": "Quando iniciado com o sistema, a janela principal permanece oculta. Se o modo leve também estiver ativo, o WebView é liberado imediatamente. Abrir o aplicativo manualmente continua mostrando a janela. Se a bandeja não estiver disponível, a janela é exibida.",
             "quiet_autostart_enabled": "Inicialização silenciosa ativada",
@@ -760,7 +760,7 @@
             "required": "Obrigatório"
         },
         "about": {
-            "title": "Sobre o Antigravity Manager",
+            "title": "Sobre o DeepGeminiProxy",
             "version": "Versão",
             "tech_stack": "Stack Tecnológico",
             "author": "Autor",
@@ -905,6 +905,15 @@
             "allow_lan_access_restart_hint": "ℹ️ Reinício do serviço necessário para aplicar alterações",
             "api_key": "Chave de Acesso (API Key)",
             "api_key_tooltip": "Segredo compartilhado usado pelos clientes quando a autorização do proxy está habilitada. Regenerar a chave invalida imediatamente a antiga.",
+            "model_base_url": {
+                "label": "URL base do modelo",
+                "protocol": "Protocolo da API",
+                "address_type": "Tipo de endereço",
+                "local": "Local",
+                "lan": "Rede local",
+                "lan_unavailable": "Nenhum endereço de rede local detectado",
+                "lan_hint": "Para se conectar de outro dispositivo, habilite o acesso pela rede local e reinicie o serviço."
+            },
             "btn_regenerate": "Regenerar Chave",
             "btn_edit": "Editar",
             "btn_save": "Salvar",
@@ -2270,52 +2279,6 @@
         "records_unit": "registros",
         "no_trend_data": "Sem dados de tendência neste período",
         "no_model_data": "Sem dados de modelos disponíveis"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN Hub",
-        "eyebrow": "Hub",
-        "description": "The official Antigravity Tools API Hub, providing stable, open, and cost-effective large model API services. Supports mainstream models like Claude, OpenAI, and Gemini. Ideal for unified configuration in Codex, Gemini CLI, Claude Code, and other development tools.",
-        "viewNow": "View Now",
-        "usage": {
-            "remainingAmount": "Remaining",
-            "usedAmount": "Used",
-            "todayRequests": "Today's Requests",
-            "todayTokens": "Today's Tokens",
-            "totalRequests": "Total Requests",
-            "totalTokens": "Total Tokens"
-        },
-        "keyManager": {
-            "title": "Key Management",
-            "desc": "Save frequently used API Keys. Click to switch and query balance automatically.",
-            "lastRemainingLabel": "Last Balance",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Not queried",
-            "addedAt": "Added at",
-            "empty": "No saved keys."
-        },
-        "queryTitle": "Key Quota Query",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Paste your API Key...",
-        "queryButton": "Refresh",
-        "cli": {
-            "quickConfig": "One-Click Local Dev Setup",
-            "syncDesc": "Sync to official standard configuration",
-            "codexTooltip": "Sync API Key & BaseURL to Antigravity Codex",
-            "claudeTooltip": "Sync API Key & BaseURL to Claude Code",
-            "opencodeTooltip": "Sincronizar API Key, BaseURL e modelos com o OpenCode"
-        },
-        "models": {
-            "title": "Available Models",
-            "empty": "No models returned for current API Key.",
-            "emptyFromKey": "Nenhum modelo retornado. Consulte para buscar os modelos disponíveis."
-        },
-        "errors": {
-            "parseFormat": "Parse format error: {{err}}",
-            "fetchFailed": "Fetch failed: {{err}}",
-            "queryFailed": "Failed to get valid quota or models. Please check if the API Key and Base URL are correct."
-        },
-        "syncSuccess": "Sincronizado com sucesso para {{app}}",
-        "syncError": "Falha ao sincronizar: {{error}}"
     },
     "debug_console": {
         "pause_scroll": "Pausar rolagem",

@@ -26,6 +26,8 @@ export interface Account {
     last_used: number;
 }
 
+export type AntigravityClient = 'classic' | 'ide' | 'agy';
+
 export interface ActiveClientsStatus {
     classic_account_id?: string | null;
     classic_email?: string | null;
@@ -33,6 +35,11 @@ export interface ActiveClientsStatus {
     ide_email?: string | null;
     agy_account_id?: string | null;
     agy_email?: string | null;
+}
+
+export function getActiveClientAccountIds(status?: ActiveClientsStatus): Set<string> {
+    const ids = [status?.classic_account_id, status?.ide_account_id, status?.agy_account_id];
+    return new Set(ids.filter((id): id is string => Boolean(id)));
 }
 
 export interface LiveLimitStatus {

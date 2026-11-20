@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="base" x1="66" y1="38" x2="442" y2="478" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#162644"/>
+      <stop offset=".52" stop-color="#080e23"/>
+      <stop offset="1" stop-color="#1b1238"/>
+    </linearGradient>
+    <radialGradient id="cyan-light" cx="104" cy="113" r="281" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#008acc" stop-opacity=".35"/>
+      <stop offset="1" stop-color="#008acc" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="violet-light" cx="399" cy="398" r="234" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#6629ff" stop-opacity=".48"/>
+      <stop offset="1" stop-color="#6629ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="85" y1="44" x2="421" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#74dbff" stop-opacity=".69"/>
+      <stop offset=".49" stop-color="#375281" stop-opacity=".32"/>
+      <stop offset="1" stop-color="#9f67ff" stop-opacity=".74"/>
+    </linearGradient>
+    <linearGradient id="face" x1="140" y1="130" x2="353" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#c3f9ff"/>
+      <stop offset=".28" stop-color="#6bdcff"/>
+      <stop offset=".52" stop-color="#5696d9"/>
+      <stop offset=".70" stop-color="#5866b6"/>
+      <stop offset="1" stop-color="#a881ee"/>
+    </linearGradient>
+    <linearGradient id="outer-bevel" x1="146" y1="114" x2="265" y2="390" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#e0ffff"/>
+      <stop offset=".28" stop-color="#97e9ff"/>
+      <stop offset=".64" stop-color="#2c5aa8"/>
+      <stop offset=".85" stop-color="#53489b"/>
+      <stop offset="1" stop-color="#bf96f5"/>
+    </linearGradient>
+    <linearGradient id="inner-bevel" x1="210" y1="169" x2="282" y2="334" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#31659e"/>
+      <stop offset=".46" stop-color="#203f83"/>
+      <stop offset="1" stop-color="#b2adf4"/>
+    </linearGradient>
+    <linearGradient id="edge" x1="126" y1="119" x2="376" y2="371" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#edffff"/>
+      <stop offset=".4" stop-color="#86daff"/>
+      <stop offset=".7" stop-color="#6273b7"/>
+      <stop offset="1" stop-color="#c09aee"/>
+    </linearGradient>
+    <linearGradient id="inlay" x1="176" y1="149" x2="308" y2="370" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f1ffff"/>
+      <stop offset=".45" stop-color="#7edbff"/>
+      <stop offset="1" stop-color="#e0b8ff"/>
+    </linearGradient>
+    <rect id="tile" x="32" y="32" width="448" height="448" rx="112"/>
+    <path id="letter" fill-rule="evenodd" d="M150 116H237C332 116 391 170 391 252C391 335 332 390 237 390H150C132 390 122 380 122 362V144C122 126 132 116 150 116ZM206 188C199 188 195 192 195 199V307C195 314 199 318 206 318H234C289 318 320 291 320 252C320 214 289 188 234 188Z"/>
+  </defs>
+
+  <use href="#tile" fill="url(#base)"/>
+  <use href="#tile" fill="url(#cyan-light)"/>
+  <use href="#tile" fill="url(#violet-light)"/>
+  <rect x="36" y="36" width="440" height="440" rx="108" fill="none" stroke="url(#rim)" stroke-width="2.5"/>
+
+  <g fill="none" stroke-linecap="round" stroke-width="2.5">
+    <path d="M79 178V151C79 119 104 94 136 94H174" stroke="#6eeaff" opacity=".30"/>
+    <path d="M333 94H356C394 94 424 124 424 162V178" stroke="#6ab6ff" opacity=".48"/>
+    <path d="M86 334V355C86 389 113 416 147 416H176" stroke="#8888ff" opacity=".48"/>
+    <path d="M337 420H357C397 420 429 388 429 348V324" stroke="#bc83ff" opacity=".36"/>
+  </g>
+  <circle cx="333" cy="94" r="4" fill="#8fddff" opacity=".67"/>
+  <circle cx="176" cy="416" r="4" fill="#bca3ff" opacity=".73"/>
+
+  <use href="#letter" transform="translate(4 9)" fill="#211a4c" stroke="#090e25" stroke-width="8"/>
+  <use href="#letter" fill="url(#outer-bevel)"/>
+  <path fill="url(#inner-bevel)" fill-rule="evenodd" d="M206 170H234C298 170 339 204 339 252C339 301 298 336 234 336H206C187 336 177 326 177 307V199C177 180 187 170 206 170ZM206 188C199 188 195 192 195 199V307C195 314 199 318 206 318H234C289 318 320 291 320 252C320 214 289 188 234 188Z"/>
+  <path fill="url(#face)" fill-rule="evenodd" d="M150 130H237C324 130 377 178 377 252C377 327 324 376 237 376H150C140 376 136 371 136 362V144C136 135 140 130 150 130ZM206 174C189 174 181 183 181 199V307C181 323 189 332 206 332H234C296 332 334 300 334 252C334 205 296 174 234 174Z"/>
+  <use href="#letter" fill="none" stroke="url(#edge)" stroke-width="2"/>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M163 148H236C299 148 348 177 358 228M354 291C338 333 294 357 236 357H195M158 203V303" stroke="#263b76" stroke-width="6" opacity=".52"/>
+    <path d="M163 147H236C299 147 348 176 358 227M354 290C338 332 294 356 236 356H195M158 203V303" stroke="url(#inlay)" stroke-width="2.5" opacity=".86"/>
+  </g>
+  <circle cx="158" cy="190" r="4" fill="#d6fcff"/>
+  <circle cx="158" cy="316" r="4" fill="#9ed1ff"/>
+</svg>

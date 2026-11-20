@@ -2654,8 +2654,7 @@ pub fn detect_active_clients_status() -> Result<crate::models::ActiveClientsStat
         .and_then(|st| find_by_rt(&st.refresh_token));
 
     // CLI 专属独立文件凭据 (~/.gemini/antigravity-cli/antigravity-oauth-token)
-    let cli_file_acc = crate::modules::integration::read_antigravity_cli_credentials()
-        .first()
+    let cli_file_acc = crate::modules::integration::read_active_agy_cli_credentials()
         .and_then(|st| find_by_rt(&st.refresh_token));
 
     // 经典款旧版 SQLite 数据库 (Antigravity < 2.0.0)
@@ -2702,13 +2701,9 @@ pub fn detect_active_clients_status() -> Result<crate::models::ActiveClientsStat
     }
 
     // 4. 确定 CLI (agy) 当前账号
-    if let Some((ref c_id, ref c_email)) = cli_file_acc {
-        if index.current_target_ide.as_deref() == Some("agy")
-            || index.current_agy_account_id.as_deref() == Some(c_id)
-        {
-            status.agy_account_id = Some(c_id.clone());
-            status.agy_email = Some(c_email.clone());
-        }
+    if let Some((id, email)) = cli_file_acc {
+        status.agy_account_id = Some(id);
+        status.agy_email = Some(email);
     }
     if status.agy_email.is_none() {
         if let Some((ref k_id, ref k_email)) = keyring_acc {

@@ -72,13 +72,14 @@
         "selected": "Selected",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "Copy to clipboard"
     },
     "nav": {
         "dashboard": "Dashboard",
         "accounts": "Accounts",
         "proxy": "API Proxy",
+        "agent_tools": "Agent Tools",
         "call_records": "Traffic Logs",
         "token_stats": "Token Stats",
         "security": "IP Management",
@@ -109,7 +110,6 @@
         "switch_to_malay": "Switch to Malay",
         "switch_to_malay_short": "MY",
         "user_token": "User Tokens",
-        "apikey_fun": "Transit Station",
         "logout": "Logout",
         "more": "More",
         "mini_view": "Mini View"
@@ -265,6 +265,12 @@
         "pro": "PRO",
         "free": "FREE",
         "edit_label": "Edit Label",
+        "activation": {
+            "title": "Launch Antigravity with this account",
+            "current_account": "Signed in to this account",
+            "signed_in_as": "Signed in as {{email}}",
+            "no_account": "No sign-in detected"
+        },
         "custom_label_placeholder": "Enter custom label",
         "label_updated": "Label updated",
         "priority": "Priority",
@@ -541,7 +547,7 @@
             "auto_launch": "Launch at Startup",
             "auto_launch_enabled": "Enabled",
             "auto_launch_disabled": "Disabled",
-            "auto_launch_desc": "Automatically launch Antigravity Tools when system starts",
+            "auto_launch_desc": "Automatically launch DeepGeminiProxy when system starts",
             "quiet_autostart": "Quiet Startup (Stay in Tray)",
             "quiet_autostart_desc": "When the app is launched at login, keep the main window hidden. If Lightweight Mode is also on, the webview is released immediately. Opening the app yourself still shows the window. If the system tray is unavailable, the window is shown instead.",
             "quiet_autostart_enabled": "Quiet startup enabled",
@@ -855,7 +861,7 @@
             "long_prompt_warning": "Prompt is quite long (over 2000 chars) and may consume significant context space."
         },
         "branding": {
-            "title": "Antigravity Tools",
+            "title": "DeepGeminiProxy",
             "subtitle": "Professional Account Management"
         },
         "lightweight_mode_desc": "Fully releases WebView memory when exiting or minimizing to tray"
@@ -908,6 +914,18 @@
             "port_tooltip": "TCP port the local API Proxy listens on. Stop the service to change it, then restart to apply.",
             "port_hint": "Default 8045, restart required to apply changes",
             "auto_start": "Auto Start with App",
+            "enabled_models": {
+                "title": "Enabled models",
+                "fetch": "Fetch model list",
+                "enable_all": "Enable all",
+                "disable_all": "Disable all",
+                "all_enabled": "All models are enabled by default, including newly discovered models.",
+                "selected_one": "{{count}} model enabled",
+                "selected_other": "{{count}} models enabled",
+                "unsaved": "Click Save to apply your model selection.",
+                "fetch_failed": "Could not fetch the model list: {{error}}",
+                "empty": "No models are currently available."
+            },
             "auto_start_tooltip": "Automatically starts the local API Proxy service when the app launches.",
             "allow_lan_access": "Allow LAN Access",
             "allow_lan_access_tooltip": "When enabled, the service binds to IPv6/IPv4 dual-stack wildcard ([::] / 0.0.0.0) so LAN and external devices can access it. Keep authorization enabled and protect your API key; service restart required to apply.",
@@ -917,6 +935,15 @@
             "allow_lan_access_restart_hint": "ℹ️ Service restart required to apply changes",
             "api_key": "API Key",
             "api_key_tooltip": "Shared secret used by clients when proxy authorization is enabled. Regenerating the key immediately invalidates the old one.",
+            "model_base_url": {
+                "label": "Model Base URL",
+                "protocol": "API protocol",
+                "address_type": "Address type",
+                "local": "Local",
+                "lan": "LAN",
+                "lan_unavailable": "No LAN address detected",
+                "lan_hint": "To connect from another device, enable LAN access and restart the service."
+            },
             "btn_regenerate": "Regenerate Key",
             "btn_edit": "Edit",
             "btn_save": "Save",
@@ -1593,17 +1620,24 @@
             "rate_limited": "429 Limited"
         },
         "cli_sync": {
+            "integration": {
+                "title": "Agent Integrations",
+                "deepwrite_hint": "Quit DeepWrite (⌘Q) first. Connecting adds Gemini models to the DeepGemini group under Custom Models.",
+                "description": "Turn on an integration to configure its gateway connection and models.",
+                "connection_changed": "Configuration changed",
+                "key_required": "Set a gateway API key to enable Agent integrations.",
+                "gateway_stopped": "The gateway is stopped. Connected tools can use it once it starts.",
+                "connected": "Connected",
+                "disconnected": "Disconnected",
+                "status_error": "Could not check configuration",
+                "switch": "Connect {{name}} to the gateway",
+                "disconnect_title": "Disconnect from gateway",
+                "restore_message": "Disconnect {{name}} and restore its backup or defaults? This can replace edits made to its configuration files since connecting.",
+                "error": "Could not update integration ({{error}})"
+            },
             "title": "One-Click Agent Tools Configuration",
             "subtitle": "Quickly sync current API endpoints and keys to your local AI Agent tools.",
             "card_title": "{{name}} Config",
-            "jeikcode_recommended": "Recommended",
-            "jeikcode_badge": "Best Matched",
-            "jeikcode_author": "by Jeikl",
-            "jeikcode_tagline": "Built by Core Maintainer · Best Gateway Fit",
-            "jeikcode_tag_cache": "95%+ Insane Cache",
-            "jeikcode_tag_codegraph": "Code Graph",
-            "jeikcode_tag_surpass": "Beats CC & Codex",
-            "jeikcode_tag_custom": "Customizable",
             "status": {
                 "not_installed": "Not detected",
                 "installed": "v{{version}}",
@@ -2382,66 +2416,6 @@
         "records_unit": "records",
         "no_trend_data": "No trend data in this period",
         "no_model_data": "No model data available"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN Hub",
-        "eyebrow": "Hub",
-        "double11Badge": "Double 11 Promo",
-        "description": "The official Antigravity Tools API Hub, providing stable, open, and cost-effective large model API services. Supports mainstream models like Claude, OpenAI, and Gemini. Ideal for unified configuration in Codex, Gemini CLI, Claude Code, and other development tools.",
-        "viewNow": "View Now",
-        "usage": {
-            "remainingAmount": "Remaining",
-            "usedAmount": "Used",
-            "todayRequests": "Today's Requests",
-            "todayTokens": "Today's Tokens",
-            "totalRequests": "Total Requests",
-            "totalTokens": "Total Tokens"
-        },
-        "keyManager": {
-            "title": "Key Management",
-            "desc": "Save frequently used API Keys. Click to switch and query balance automatically.",
-            "lastRemainingLabel": "Last Balance",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Not queried",
-            "addedAt": "Added at",
-            "empty": "No saved keys."
-        },
-        "queryTitle": "Key Quota Query",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Paste your API Key...",
-        "queryButton": "Refresh",
-        "cli": {
-            "quickConfig": "One-Click Local Dev Setup",
-            "syncDesc": "Sync to official standard configuration",
-            "codexTooltip": "Sync API Key & BaseURL to Codex / ChatGPT CLI",
-            "claudeTooltip": "Sync API Key & BaseURL to Claude Code",
-            "opencodeTooltip": "Sync API Key, BaseURL and models to OpenCode"
-        },
-        "models": {
-            "title": "Available Models",
-            "empty": "Enter key and query to load available models.",
-            "emptyFromKey": "No models returned yet. Query to fetch models."
-        },
-        "errors": {
-            "parseFormat": "Parse format error: {{err}}",
-            "fetchFailed": "Fetch failed: {{err}}",
-            "queryFailed": "Failed to get valid quota or models. Please check if the API Key and Base URL are correct."
-        },
-        "opencode": {
-            "modelsRequired": "Refresh this key to load available models before activating its OpenCode profile.",
-            "active": "Active",
-            "modified": "Modified",
-            "inactive": "Inactive",
-            "syncedToast": "Synced to OpenCode: {{name}}",
-            "removedToast": "Removed from OpenCode: {{name}}",
-            "clickToRemove": "OpenCode profile is active and synced. Click to deactivate/remove",
-            "clickToUpdate": "Settings or models differ. Click to update",
-            "clickToActivate": "Click to activate separate profile in OpenCode",
-            "syncedActiveTooltip": "OpenCode: profile is active and fully synced. Click to deactivate",
-            "partialTooltip": "OpenCode: settings or models differ. Click to sync"
-        },
-        "syncSuccess": "Successfully synced to {{app}}",
-        "syncError": "Failed to sync: {{error}}"
     },
     "suggestion_delete_thinking": {
         "title": "Update Recommendation",

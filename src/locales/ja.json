@@ -72,13 +72,14 @@
         "selected": "選択済み",
         "claude_series": "Claude シリーズ",
         "maximize": "最大化",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "クリップボードにコピー"
     },
     "nav": {
         "dashboard": "ダッシュボード",
         "accounts": "アカウント",
         "proxy": "APIプロキシ",
+        "agent_tools": "エージェントツール",
         "call_records": "トラフィックログ",
         "token_stats": "統計",
         "security": "IP管理",
@@ -109,7 +110,6 @@
         "switch_to_malay": "マレー語に切り替え",
         "switch_to_malay_short": "MY",
         "user_token": "ユーザートークン",
-        "apikey_fun": "Transit Station",
         "logout": "ログアウト",
         "more": "その他",
         "mini_view": "ミニビュー"
@@ -525,7 +525,7 @@
             "auto_launch": "起動時に実行",
             "auto_launch_enabled": "有効",
             "auto_launch_disabled": "無効",
-            "auto_launch_desc": "システム起動時にAntigravity Toolsを自動的に起動する",
+            "auto_launch_desc": "システム起動時にDeepGeminiProxyを自動的に起動する",
             "quiet_autostart": "静かな起動（トレイに残す）",
             "quiet_autostart_desc": "ログイン時の自動起動ではメインウィンドウを表示しません。軽量モードも有効な場合は WebView を直ちに解放します。自分で開いたときはウィンドウを表示します。システムトレイが使えない場合はウィンドウを表示します。",
             "quiet_autostart_enabled": "静かな起動を有効にしました",
@@ -835,7 +835,7 @@
             "long_prompt_warning": "プロンプトがかなり長く（2000文字以上）、コンテキスト スペースを大幅に消費する可能性があります。"
         },
         "branding": {
-            "title": "Antigravity Tools",
+            "title": "DeepGeminiProxy",
             "subtitle": "プロフェッショナルなアカウント管理"
         },
         "lightweight_mode_desc": "有効にすると、終了またはトレイ格納時にWebViewメモリを完全に解放します"
@@ -892,6 +892,15 @@
             "allow_lan_access_restart_hint": "ℹ️ 適用にはサービスの再起動が必要です",
             "api_key": "APIキー",
             "api_key_tooltip": "プロキシ認証が有効な場合にクライアントが使用する共通の秘密キー。キーを再生成すると古いキーは即座に無効になります。",
+            "model_base_url": {
+                "label": "モデルのベース URL",
+                "protocol": "API プロトコル",
+                "address_type": "アドレスの種類",
+                "local": "ローカル",
+                "lan": "LAN",
+                "lan_unavailable": "LAN アドレスが見つかりません",
+                "lan_hint": "別の端末から接続するには、LAN アクセスを有効にしてサービスを再起動してください。"
+            },
             "btn_regenerate": "キーを再生成",
             "btn_edit": "編集",
             "btn_save": "保存",
@@ -2234,49 +2243,6 @@
         "records_unit": "件の記録",
         "no_trend_data": "この期間の推移データはありません",
         "no_model_data": "モデルデータがありません"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN ハブ",
-        "eyebrow": "ハブ",
-        "description": "Antigravity Tools 公式提携ハブ。安定かつ高コストパフォーマンスのAPIサービスを提供します。Claude、OpenAI、Geminiなどのモデルをサポート。",
-        "viewNow": "今すぐ見る",
-        "usage": {
-            "remainingAmount": "残高",
-            "usedAmount": "使用済み",
-            "todayRequests": "本日のリクエスト",
-            "todayTokens": "本日のトークン",
-            "totalRequests": "総リクエスト",
-            "totalTokens": "総トークン"
-        },
-        "keyManager": {
-            "title": "キー管理",
-            "desc": "よく使うAPIキーを保存し、クリックで切り替えて残高を確認します。",
-            "lastRemainingLabel": "前回残高",
-            "lastRemaining": "${{value}}",
-            "notQueried": "未確認",
-            "addedAt": "追加日時",
-            "empty": "保存されたキーはありません"
-        },
-        "queryTitle": "キー残高照会",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "APIキーを貼り付け...",
-        "queryButton": "更新",
-        "cli": {
-            "quickConfig": "ワンクリック開発環境設定",
-            "syncDesc": "公式標準設定に同期",
-            "codexTooltip": "Codexに同期",
-            "claudeTooltip": "Claude Codeに同期",
-            "opencodeTooltip": "API Key、BaseURL、モデルを OpenCode に同期"
-        },
-        "models": {
-            "title": "利用可能なモデル",
-            "empty": "モデルリストがありません"
-        },
-        "errors": {
-            "parseFormat": "パースエラー: {{err}}",
-            "fetchFailed": "取得失敗: {{err}}",
-            "queryFailed": "データの取得に失敗しました。キーを確認してください。"
-        }
     },
     "suggestion_delete_thinking": {
         "title": "バージョン更新のお知らせ",

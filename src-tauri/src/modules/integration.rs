@@ -70,6 +70,7 @@ pub fn resolve_effective_target(
 /// 桌面版实现：包含完整的进程控制 and UI 同步
 pub struct DesktopIntegration {
     pub app_handle: tauri::AppHandle,
+    pub require_client_launch: bool,
 }
 
 /// 写入账号凭据：>= 2.0.0 的原生应用走系统 Keyring，旧架构与定制 IDE 走 SQLite 注入。
@@ -503,7 +504,8 @@ impl SystemIntegration for DesktopIntegration {
             // 若切号前外部客户端原本就没有处于运行状态，且启动失败原因是找不到客户端可执行文件
             // （例如纯反代服务模式、未安装 GUI 客户端或无头环境）：
             // 此时凭据和配置已经写入成功，降级处理并记录信息，避免让整个切号操作报错中断。
-            if !running && process::is_client_executable_missing(&e) {
+            if !self.require_client_launch && !running && process::is_client_executable_missing(&e)
+            {
                 crate::modules::logger::log_info(
                     "[Desktop] Client executable not found and was not running before switch; credentials applied successfully.",
                 );
@@ -914,7 +916,7 @@ fn write_to_file_credentials_to_dir(
             }
         }
 
-        let agy_token_path = agy_cli_dir.join("antigravity-oauth-token");
+        let agy_token_path = agy_token_path(gemini_dir);
         if let Ok(agy_json_str) = serde_json::to_string_pretty(&agy_token) {
             if let Err(e) = std::fs::write(&agy_token_path, agy_json_str) {
                 crate::modules::logger::log_warn(&format!(
@@ -1032,9 +1034,7 @@ fn read_from_file_credentials_from_dir(
 ) -> Result<crate::modules::migration::ImportedOAuthState, String> {
     // 1. 优先尝试从 Antigravity CLI (agy) 原生文件凭据或 Standalone 回退凭据读取
     let candidate_paths = [
-        gemini_dir
-            .join("antigravity-cli")
-            .join("antigravity-oauth-token"),
+        agy_token_path(gemini_dir),
         gemini_dir.join("jetski-standalone-oauth-token"),
     ];
     for path in &candidate_paths {
@@ -1078,6 +1078,18 @@ fn read_from_file_credentials() -> Result<crate::modules::migration::ImportedOAu
     read_from_file_credentials_from_dir(&home.join(".gemini"))
 }
 
+fn agy_token_path(gemini_dir: &std::path::Path) -> std::path::PathBuf {
+    gemini_dir
+        .join("antigravity-cli")
+        .join("antigravity-oauth-token")
+}
+
+pub(crate) fn read_active_agy_cli_credentials(
+) -> Option<crate::modules::migration::ImportedOAuthState> {
+    let content = fs::read_to_string(agy_token_path(&dirs::home_dir()?.join(".gemini"))).ok()?;
+    parse_keyring_payload(&content).ok()
+}
+
 /// 读取 Antigravity CLI (agy) 原生与备份文件凭据，严格限制仅扫描 Antigravity
 pub fn read_antigravity_cli_credentials() -> Vec<crate::modules::migration::ImportedOAuthState> {
     let mut states = Vec::new();
@@ -1085,12 +1097,13 @@ pub fn read_antigravity_cli_credentials() -> Vec<crate::modules::migration::Impo
         return states;
     };
 
-    let cli_dir = home.join(".gemini").join("antigravity-cli");
+    let gemini_dir = home.join(".gemini");
+    let cli_dir = gemini_dir.join("antigravity-cli");
     let candidate_files = [
-        cli_dir.join("antigravity-oauth-token"),
+        agy_token_path(&gemini_dir),
         cli_dir.join("antigravity-oauth-token.antigravity.bak"),
         cli_dir.join("antigravity-oauth-token.bak"),
-        home.join(".gemini").join("jetski-standalone-oauth-token"),
+        gemini_dir.join("jetski-standalone-oauth-token"),
     ];
 
     let mut seen_tokens = std::collections::HashSet::new();
@@ -1428,6 +1441,7 @@ impl SystemManager {
             SystemManager::Desktop(handle) => {
                 let integration = DesktopIntegration {
                     app_handle: handle.clone(),
+                    require_client_launch: false,
                 };
                 integration.on_account_switch(account, target_ide).await
             }
@@ -1446,6 +1460,7 @@ impl SystemManager {
         if let SystemManager::Desktop(handle) = self {
             let integration = DesktopIntegration {
                 app_handle: handle.clone(),
+                require_client_launch: false,
             };
             integration.update_tray();
         }
@@ -1456,6 +1471,7 @@ impl SystemManager {
             SystemManager::Desktop(handle) => {
                 let integration = DesktopIntegration {
                     app_handle: handle.clone(),
+                    require_client_launch: false,
                 };
                 integration.show_notification(title, body);
             }

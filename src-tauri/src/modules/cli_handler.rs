@@ -57,7 +57,7 @@ pub async fn try_handle_cli(args: &[String]) -> Result<bool, String> {
 
 fn print_cli_help() {
     println!(
-        "\x1b[1mAntigravity Tools CLI\x1b[0m\n\n\
+        "\x1b[1mDeepGeminiProxy CLI\x1b[0m\n\n\
         Usage: antigravity-tools <command> [options]\n\n\
         Commands:\n  \
           switch [account]   Switch current account (supports email, index, name, or auto round-robin)\n  \

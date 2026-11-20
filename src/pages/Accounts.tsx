@@ -13,6 +13,7 @@ import {
   Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AccountActivationDialog } from "../components/accounts/AccountActivation";
 import AccountDetailsDialog from "../components/accounts/AccountDetailsDialog";
 import AccountGrid from "../components/accounts/AccountGrid";
 import AccountTable from "../components/accounts/AccountTable";
@@ -25,7 +26,7 @@ import { showToast } from "../components/common/ToastContainer";
 import { exportAccounts } from "../services/accountService";
 import { useAccountStore } from "../stores/useAccountStore";
 import { useConfigStore } from "../stores/useConfigStore";
-import { Account, getAccountTier, ImportAccountEntry } from "../types/account";
+import { Account, AntigravityClient, getAccountTier, getActiveClientAccountIds, ImportAccountEntry } from "../types/account";
 import { cn } from "../utils/cn";
 import { isTauri } from "../utils/env";
 import { request as invoke } from "../utils/request";
@@ -107,6 +108,8 @@ function Accounts() {
   const [deviceAccount, setDeviceAccount] = useState<Account | null>(null);
   const [detailsAccount, setDetailsAccount] = useState<Account | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [activationAccountId, setActivationAccountId] = useState<string | null>(null);
+  const activationAccount = accounts.find(account => account.id === activationAccountId);
   const [isBatchDelete, setIsBatchDelete] = useState(false);
   const [toggleProxyConfirm, setToggleProxyConfirm] = useState<{
     accountId: string;
@@ -314,10 +317,21 @@ function Accounts() {
   }, [searchedAccounts, filter]);
 
   // Pagination Logic
+  const activeClientIds = useMemo(() => getActiveClientAccountIds(activeClients), [activeClients]);
   const paginatedAccounts = useMemo(() => {
     const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
-    return filteredAccounts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
-  }, [filteredAccounts, currentPage, ITEMS_PER_PAGE]);
+    const orderedAccounts = [
+      ...filteredAccounts.filter(account => activeClientIds.has(account.id)),
+      ...filteredAccounts.filter(account => !activeClientIds.has(account.id)),
+    ];
+    return orderedAccounts.slice(startIndex, startIndex + ITEMS_PER_PAGE);
+  }, [filteredAccounts, activeClientIds, currentPage, ITEMS_PER_PAGE]);
+
+  const handleReorder = (orderedIds: string[]) => {
+    const reorderedIds = new Set(orderedIds);
+    let index = 0;
+    return reorderAccounts(accounts.map(({ id }) => reorderedIds.has(id) ? orderedIds[index++] : id));
+  };
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
@@ -361,22 +375,37 @@ function Accounts() {
     null,
   );
 
-  const handleSwitch = async (accountId: string, targetIde?: string) => {
-    if (loading || switchingAccountId) return;
+  const handleSwitch = async (accountId: string, targetIde?: string, launchClient?: boolean) => {
+    if (loading || switchingAccountId) return false;
 
     setSwitchingAccountId(accountId);
     console.log("[Accounts] handleSwitch called for:", accountId, "targetIde:", targetIde);
     try {
-      await switchAccount(accountId, targetIde);
+      await switchAccount(accountId, targetIde, launchClient);
       showToast(t("common.success"), "success");
+      return true;
     } catch (error) {
       console.error("[Accounts] Switch failed:", error);
       showToast(`${t("common.error")}: ${error}`, "error");
+      return false;
     } finally {
       // Add a small delay for smoother UX
       setTimeout(() => {
         setSwitchingAccountId(null);
       }, 500);
+    }
+  };
+
+  const openActivation = (accountId: string) => {
+    setActivationAccountId(accountId);
+    void fetchActiveClients();
+  };
+
+  const launchActivatedAccount = async (client: AntigravityClient) => {
+    if (!activationAccount || activationAccount.disabled) return;
+    if (await handleSwitch(activationAccount.id, client, true)) {
+      setActivationAccountId(null);
+      setCurrentPage(1);
     }
   };
 
@@ -1142,6 +1171,7 @@ function Accounts() {
                 activeClients={activeClients}
                 switchingAccountId={switchingAccountId}
                 onSwitch={handleSwitch}
+                onActivate={isTauri() ? openActivation : undefined}
                 onRefresh={handleRefresh}
                 onViewDevice={handleViewDevice}
                 onViewDetails={handleViewDetails}
@@ -1153,7 +1183,7 @@ function Accounts() {
                     !!accounts.find((a) => a.id === id)?.proxy_disabled,
                   )
                 }
-                onReorder={reorderAccounts}
+                onReorder={handleReorder}
                 onWarmup={handleWarmup}
                 onUpdateLabel={handleUpdateLabel}
                 onViewError={(id: string) => setErrorAccountId(id)}
@@ -1171,6 +1201,7 @@ function Accounts() {
               activeClients={activeClients}
               switchingAccountId={switchingAccountId}
               onSwitch={handleSwitch}
+              onActivate={isTauri() ? openActivation : undefined}
               onRefresh={handleRefresh}
               onViewDevice={handleViewDevice}
               onViewDetails={handleViewDetails}
@@ -1206,6 +1237,17 @@ function Accounts() {
             pageSizeOptions={[10, 20, 50, 100]}
           />
         </div>
+      )}
+
+      {activationAccount && (
+        <AccountActivationDialog
+          account={activationAccount}
+          accounts={accounts}
+          status={activeClients}
+          busy={loading || switchingAccountId !== null}
+          onLaunch={launchActivatedAccount}
+          onClose={() => setActivationAccountId(null)}
+        />
       )}
 
       <AccountDetailsDialog

@@ -37,8 +37,8 @@ import ModalDialog from '../components/common/ModalDialog';
 import { showToast } from '../components/common/ToastContainer';
 import { cn } from '../utils/cn';
 import { useProxyModels } from '../hooks/useProxyModels';
+import { useProxyStatus } from '../hooks/useProxyStatus';
 import GroupedSelect, { SelectOption } from '../components/common/GroupedSelect';
-import { CliSyncCard } from '../components/proxy/CliSyncCard';
 import { listAccounts } from '../services/accountService';
 import { motion } from 'framer-motion';
 import CircuitBreaker from '../components/settings/CircuitBreaker';
@@ -49,13 +49,14 @@ import MultimodalSettings from '../components/settings/MultimodalSettings';
 import TimeoutSettings from '../components/settings/TimeoutSettings';import AgentSettings from '../components/settings/AgentSettings';
 import { CircuitBreakerConfig } from '../types/config';
 import { RequestDetailModal, ProxyRequestLog } from '../components/proxy/RequestDetailModal';
+import EnabledModelsPanel from '../components/proxy/EnabledModelsPanel';
 
-interface ProxyStatus {
-    running: boolean;
-    port: number;
-    base_url: string;
-    active_accounts: number;
-}
+const BASE_URL_PROTOCOLS = [
+    { id: 'openai-chat', label: 'OpenAI Chat Completions', path: '/v1' },
+    { id: 'openai-responses', label: 'OpenAI Responses', path: '/v1' },
+    { id: 'anthropic', label: 'Anthropic Claude', path: '' },
+    { id: 'gemini', label: 'Google Gemini', path: '' },
+] as const;
 
 interface CustomPreset {
     id: string;
@@ -163,19 +164,24 @@ export default function ApiProxy() {
 
     const { models } = useProxyModels();
 
-    const [status, setStatus] = useState<ProxyStatus>({
+    const { status: proxyStatus, refreshStatus } = useProxyStatus();
+    const status = proxyStatus ?? {
         running: false,
         port: 0,
         base_url: '',
         active_accounts: 0,
-    });
+    };
 
     const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
-    const [activeMenuTab, setActiveMenuTab] = useState<'settings' | 'models' | 'cli' | 'protocols'>('settings');
+    const [enabledModelsDraft, setEnabledModelsDraft] = useState<string[] | null>();
+    const [savingProxySettings, setSavingProxySettings] = useState(false);
+    const [activeMenuTab, setActiveMenuTab] = useState<'settings' | 'models' | 'protocols'>('settings');
     const [configLoading, setConfigLoading] = useState(true);
     const [configError, setConfigError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
     const [copied, setCopied] = useState<string | null>(null);
+    const [baseUrlProtocol, setBaseUrlProtocol] = useState<typeof BASE_URL_PROTOCOLS[number]>(BASE_URL_PROTOCOLS[0]);
+    const [baseUrlScope, setBaseUrlScope] = useState<'local' | 'lan'>('local');
     const [selectedProtocol, setSelectedProtocol] = useState<'openai' | 'anthropic' | 'gemini'>('openai');
     const [selectedModelId, setSelectedModelId] = useState('gemini-3.8-flash-tiered');
     const [customMappingValue, setCustomMappingValue] = useState(''); // 自定义映射表单的选中值
@@ -271,19 +277,14 @@ export default function ApiProxy() {
     // 初始化加载
     useEffect(() => {
         loadConfig();
-        loadStatus();
         loadAccounts();
         loadPreferredAccount();
         loadCfStatus();
         loadCustomPresets();
         loadRecentModelStatuses();
         loadHubFingerprintInfo();
-        const interval = setInterval(loadStatus, 3000);
         const cfInterval = setInterval(loadCfStatus, 5000);
-        return () => {
-            clearInterval(interval);
-            clearInterval(cfInterval);
-        };
+        return () => clearInterval(cfInterval);
     }, []);
 
     // 动态获取应用启动时探测到的官方 Hub 版本信息
@@ -592,22 +593,6 @@ export default function ApiProxy() {
         }
     };
 
-    const loadStatus = async () => {
-        try {
-            const s = await invoke<ProxyStatus>('get_proxy_status');
-            // 如果后端返回 starting 或 busy，则在 UI 上表现为加载中
-            if (s.base_url === 'starting' || s.base_url === 'busy') {
-                // 如果当前已经是运行状态，不要被覆盖为 false
-                setStatus(prev => ({ ...s, running: prev.running }));
-            } else {
-                setStatus(s);
-            }
-        } catch (error) {
-            console.error('获取状态失败:', error);
-        }
-    };
-
-
     const saveConfig = async (newConfig: AppConfig) => {
         // 1. 立即更新 UI 状态，确保流畅
         setAppConfig(newConfig);
@@ -620,9 +605,16 @@ export default function ApiProxy() {
     };
 
     const handleSaveProxySettings = async () => {
-        if (!appConfig) return;
+        if (!appConfig || loading || savingProxySettings) return;
+        const config = enabledModelsDraft === undefined ? appConfig : {
+            ...appConfig,
+            proxy: { ...appConfig.proxy, enabled_models: enabledModelsDraft },
+        };
+        setSavingProxySettings(true);
         try {
-            await invoke('save_config', { config: appConfig });
+            await invoke('save_config', { config });
+            setAppConfig(config);
+            setEnabledModelsDraft(undefined);
             const refreshed = await invoke<AppConfig>('load_config');
             if (refreshed) {
                 setAppConfig(refreshed);
@@ -631,6 +623,8 @@ export default function ApiProxy() {
         } catch (error) {
             console.error('保存配置失败:', error);
             showToast(`${t('common.error')}: ${error}`, 'error');
+        } finally {
+            setSavingProxySettings(false);
         }
     };
 
@@ -1129,7 +1123,7 @@ export default function ApiProxy() {
                 // 使用当前的 appConfig.proxy 启动
                 await invoke('start_proxy_service', { config: newConfig.proxy });
             }
-            await loadStatus();
+            await refreshStatus();
         } catch (error: any) {
             showToast(t('proxy.dialog.operate_failed', { error: error.toString() }), 'error');
         } finally {
@@ -1982,6 +1976,20 @@ print(response.choices[0].message.content)`;
         );
     };
 
+    const proxyPort = status.port || appConfig?.proxy.port || 8045;
+    const webLocation = isTauri() ? null : window.location;
+    const localWebOrigin = webLocation && /^(localhost\.?|127(?:\.\d{1,3}){3}|\[::1\])$/i.test(webLocation.hostname)
+        ? webLocation.origin
+        : '';
+    const remoteWebOrigin = !localWebOrigin ? webLocation?.origin : undefined;
+    const localBase = localWebOrigin || `http://127.0.0.1:${proxyPort}`;
+    // The remote Web address retains the public-facing port and scheme.
+    const lanBase = remoteWebOrigin || (proxyStatus?.lan_ip ? `http://${proxyStatus.lan_ip}:${proxyPort}` : '');
+    const selectedBase = baseUrlScope === 'local' ? localBase : lanBase;
+    const modelBaseUrl = selectedBase ? `${selectedBase}${baseUrlProtocol.path}` : '';
+    const baseUrlCopyLabel = `base-url:${modelBaseUrl}`;
+    const baseUrlCopyText = t(copied === baseUrlCopyLabel ? 'proxy.config.btn_copied' : 'proxy.config.btn_copy');
+
     return (
         <motion.div
             initial={{ opacity: 0, y: 10 }}
@@ -2033,7 +2041,7 @@ print(response.choices[0].message.content)`;
                 {!configLoading && !configError && appConfig && (
                     <div className="bg-white dark:bg-base-100 rounded-xl shadow-xs border border-gray-200/80 dark:border-base-200">
                         <div className="px-4 sm:px-5 py-2.5 border-b border-gray-100 dark:border-base-200 bg-gray-50/60 dark:bg-base-200/80 flex flex-wrap items-center justify-between gap-3">
-                            {/* 菜单栏：服务配置、模型配置、模型大全与协议、CLI 一键配置 */}
+                            {/* 菜单栏：服务配置、模型配置、模型大全与协议 */}
                             <div className="flex items-center gap-1.5 bg-gray-200/70 dark:bg-base-300/60 p-1 rounded-xl">
                                 <button
                                     type="button"
@@ -2061,18 +2069,6 @@ print(response.choices[0].message.content)`;
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => setActiveMenuTab('cli')}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
-                                        activeMenuTab === 'cli'
-                                            ? 'bg-white dark:bg-base-100 text-blue-600 dark:text-blue-400 shadow-xs'
-                                            : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
-                                    }`}
-                                >
-                                    <Terminal size={14} className={activeMenuTab === 'cli' ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400'} />
-                                    {t('proxy.cli_sync.title', { defaultValue: 'Agent工具一键配置' })}
-                                </button>
-                                <button
-                                    type="button"
                                     onClick={() => setActiveMenuTab('protocols')}
                                     className={`px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all ${
                                         activeMenuTab === 'protocols'
@@ -2089,19 +2085,19 @@ print(response.choices[0].message.content)`;
                             <div className="flex items-center gap-2.5 ml-auto">
                                 <button
                                     onClick={handleSaveProxySettings}
-                                    disabled={!appConfig}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-xs active:scale-95 ${!appConfig ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    disabled={!appConfig || loading || savingProxySettings}
+                                    className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white shadow-xs active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     <Save size={14} />
                                     {t('settings.save')}
                                 </button>
                                 <button
                                     onClick={handleToggle}
-                                    disabled={loading || !appConfig}
+                                    disabled={loading || !appConfig || savingProxySettings}
                                     className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 shadow-xs active:scale-95 ${status.running
                                         ? 'bg-rose-600 hover:bg-rose-700 text-white border border-rose-600'
                                         : 'bg-emerald-600 hover:bg-emerald-700 text-white border border-emerald-600'
-                                        } ${(loading || !appConfig) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        } ${(loading || !appConfig || savingProxySettings) ? 'opacity-50 cursor-not-allowed' : ''}`}
                                 >
                                     <Power size={14} />
                                     {loading ? t('proxy.status.processing') : (status.running ? t('proxy.action.stop') : t('proxy.action.start'))}
@@ -2203,6 +2199,12 @@ print(response.choices[0].message.content)`;
                                 </div>
                             </div>
 
+                            <EnabledModelsPanel
+                                value={enabledModelsDraft === undefined ? appConfig.proxy.enabled_models ?? null : enabledModelsDraft}
+                                dirty={enabledModelsDraft !== undefined}
+                                disabled={savingProxySettings}
+                                onChange={setEnabledModelsDraft}
+                            />
 
                             {/* 局域网访问 & 访问授权 */}
                             <div className="border-t border-gray-100 dark:border-base-200 pt-3.5 mt-3.5">
@@ -2307,6 +2309,62 @@ print(response.choices[0].message.content)`;
                                         </div>
                                     </div>
                                 </div>
+                            </div>
+
+                            <div className="border-t border-gray-100 dark:border-base-200 pt-3.5 mt-3.5">
+                                <label htmlFor="model-base-url" className="block text-xs font-semibold text-gray-700 dark:text-gray-200 mb-1.5">
+                                    {t('proxy.config.model_base_url.label')}
+                                </label>
+                                <div className="flex flex-wrap gap-2">
+                                    <select
+                                        value={baseUrlProtocol.id}
+                                        onChange={(e) => {
+                                            const protocol = BASE_URL_PROTOCOLS.find((option) => option.id === e.target.value);
+                                            if (protocol) setBaseUrlProtocol(protocol);
+                                        }}
+                                        aria-label={t('proxy.config.model_base_url.protocol')}
+                                        className="min-w-0 max-w-full px-2 py-1.5 border border-gray-300 dark:border-base-300 rounded-lg bg-white dark:bg-base-200 text-xs text-gray-700 dark:text-gray-200"
+                                    >
+                                        {BASE_URL_PROTOCOLS.map(({ id, label }) => (
+                                            <option key={id} value={id}>{label}</option>
+                                        ))}
+                                    </select>
+                                    <select
+                                        value={baseUrlScope}
+                                        onChange={(e) => setBaseUrlScope(e.target.value === 'lan' ? 'lan' : 'local')}
+                                        aria-label={t('proxy.config.model_base_url.address_type')}
+                                        className="px-2 py-1.5 border border-gray-300 dark:border-base-300 rounded-lg bg-white dark:bg-base-200 text-xs text-gray-700 dark:text-gray-200"
+                                    >
+                                        <option value="local">{t('proxy.config.model_base_url.local')}</option>
+                                        <option value="lan">{t('proxy.config.model_base_url.lan')}</option>
+                                    </select>
+                                    <div className="flex min-w-[min(100%,16rem)] flex-1 gap-2">
+                                        <input
+                                            id="model-base-url"
+                                            type="text"
+                                            value={modelBaseUrl}
+                                            placeholder={t('proxy.config.model_base_url.lan_unavailable')}
+                                            title={modelBaseUrl}
+                                            readOnly
+                                            className="min-w-0 flex-1 px-3 py-1.5 border border-gray-300 dark:border-base-300 rounded-lg bg-gray-50 dark:bg-base-200 text-xs font-mono text-gray-700 dark:text-gray-300"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => copyToClipboardHandler(modelBaseUrl, baseUrlCopyLabel)}
+                                            disabled={!modelBaseUrl}
+                                            title={baseUrlCopyText}
+                                            aria-label={baseUrlCopyText}
+                                            className="px-2.5 py-1.5 border border-gray-300 dark:border-base-300 rounded-lg bg-white dark:bg-base-200 hover:bg-gray-50 dark:hover:bg-base-300 transition-colors text-gray-600 dark:text-gray-300 shadow-2xs disabled:opacity-50 disabled:cursor-not-allowed"
+                                        >
+                                            {copied === baseUrlCopyLabel ? <CheckCircle size={15} className="text-emerald-500" /> : <Copy size={15} />}
+                                        </button>
+                                    </div>
+                                </div>
+                                {baseUrlScope === 'lan' && !remoteWebOrigin && (
+                                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                                        {t('proxy.config.model_base_url.lan_hint')}
+                                    </p>
+                                )}
                             </div>
 
                             {/* API 密钥 */}
@@ -2775,19 +2833,7 @@ print(response.choices[0].message.content)`;
                             </div>
                         )}
 
-                        {/* TAB 3: CLI 一键配置 (cli) */}
-                        {activeMenuTab === 'cli' && (
-                            <div className="p-4">
-                                <div className="bg-gray-50/60 dark:bg-base-200/50 rounded-xl p-3 border border-gray-200/60 dark:border-base-300">
-                                    <CliSyncCard
-                                        proxyUrl={status.running ? status.base_url : `http://127.0.0.1:${appConfig.proxy.port || 8045}`}
-                                        apiKey={appConfig.proxy.api_key}
-                                    />
-                                </div>
-                            </div>
-                        )}
-
-                        {/* TAB 4: 模型大全与协议 (protocols) */}
+                        {/* TAB 3: 模型大全与协议 (protocols) */}
                         {activeMenuTab === 'protocols' && (
                             <div className="p-4 space-y-6">
                                 {renderMultiProtocolSection()}

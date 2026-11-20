@@ -1,8 +1,13 @@
 # 📝 Changelog
 
-> Complete version history for Antigravity Tools. Return to project home at [README.md](README.md).
+> Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.0 (First independent DeepGeminiProxy release)**:
+        -   DeepGeminiProxy starts its own version series at `1.0.0` and checks its own GitHub Releases for updates. Earlier entries are retained as upstream history.
+        -   The new Agent Tools page brings client synchronization together, including DeepWrite integration on macOS.
+        -   GitHub Actions builds macOS, Windows, and Linux installers and includes SHA-256 checksums in each release.
+        -   Retains the upstream object-union merge fix ([PR #3878](https://github.com/lbjlaq/Antigravity-Manager/pull/3878), thanks to @snailb1007).
     *   **v5.0.3 (2026-11-06)**:
         -   **[Quota Attribution Governance: Root-Fixing 503 Misattribution & Quota False-Death; Refactoring Bucket Scheduling and Priority Competition] (Fixes #3838, #3841, #3821, PR #3845, Ref #3827, #3840)**:
             -   **Eradicate 503 Attribution Pollution (92.6% of all 5xx)**: Unified all internal gateway throttling predicates into the single source of truth `policy::is_internal_gateway_exhaustion`, covering the previously mis-detected `All accounts rate-limited` (the old list only matched `all accounts limited`), so local pool throttling is no longer reported as an upstream 503; converged the two other drifting implementations in `rate_limit.rs` and `token_manager.rs`. (Fixes #3838)

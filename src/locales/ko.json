@@ -72,13 +72,14 @@
         "selected": "선택됨",
         "claude_series": "Claude 시리즈",
         "maximize": "최대화",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "클립보드에 복사"
     },
     "nav": {
         "dashboard": "대시보드",
         "accounts": "계정 관리",
         "proxy": "API 프록시",
+        "agent_tools": "에이전트 도구",
         "call_records": "트래픽 로그",
         "token_stats": "토큰 통계",
         "security": "IP 관리",
@@ -109,7 +110,6 @@
         "switch_to_malay": "말레이어로 전환",
         "switch_to_malay_short": "MY",
         "user_token": "사용자 토큰",
-        "apikey_fun": "API 중계소",
         "logout": "로그아웃",
         "more": "더 보기",
         "mini_view": "미니 뷰"
@@ -525,7 +525,7 @@
             "auto_launch": "시작 시 실행",
             "auto_launch_enabled": "활성화됨",
             "auto_launch_disabled": "비활성화됨",
-            "auto_launch_desc": "시스템 시작 시 Antigravity Tools 자동 실행",
+            "auto_launch_desc": "시스템 시작 시 DeepGeminiProxy 자동 실행",
             "quiet_autostart": "방해 없이 시작 (트레이에 유지)",
             "quiet_autostart_desc": "로그인 시 자동 실행되면 메인 창을 띄우지 않습니다. 경량 모드도 켜져 있으면 WebView를 바로 해제합니다. 직접 실행하면 창이 표시됩니다. 시스템 트레이를 사용할 수 없으면 창을 표시합니다.",
             "quiet_autostart_enabled": "방해 없이 시작을 켰습니다",
@@ -835,7 +835,7 @@
             "long_prompt_warning": "프롬프트가 너무 깁니다 (2000자 초과). 컨텍스트 공간을 많이 차지할 수 있습니다."
         },
         "branding": {
-            "title": "Antigravity Tools",
+            "title": "DeepGeminiProxy",
             "subtitle": "전문적인 계정 관리"
         },
         "lightweight_mode_desc": "활성화 시 종료하거나 트레이로 최소화할 때 WebView 메모리를 완전히 해제합니다"
@@ -892,6 +892,15 @@
             "allow_lan_access_restart_hint": "ℹ️ 변경 사항을 적용하려면 서비스 다시 시작 필요",
             "api_key": "API 키",
             "api_key_tooltip": "프록시 인증이 활성화된 경우 클라이언트가 사용하는 공유 비밀 키입니다. 키를 재생성하면 이전 키는 즉시 무효화됩니다.",
+            "model_base_url": {
+                "label": "모델 기본 URL",
+                "protocol": "API 프로토콜",
+                "address_type": "주소 유형",
+                "local": "로컬",
+                "lan": "LAN",
+                "lan_unavailable": "LAN 주소를 찾을 수 없습니다",
+                "lan_hint": "다른 기기에서 연결하려면 LAN 액세스를 허용하고 서비스를 다시 시작하세요."
+            },
             "btn_regenerate": "키 재생성",
             "btn_edit": "편집",
             "btn_save": "저장",
@@ -2234,49 +2243,6 @@
         "records_unit": "개 기록",
         "no_trend_data": "해당 기간의 추세 데이터가 없습니다",
         "no_model_data": "모델 데이터가 없습니다"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN 허브",
-        "eyebrow": "허브",
-        "description": "Antigravity Tools 공식 API 허브로, 안정적이고 개방적이며 가성비 높은 대형 모델 API 서비스를 제공합니다. Claude, OpenAI, Gemini 등 주요 모델을 지원하며 Codex, Gemini CLI, Claude Code 등 개발 도구에서 통합 설정해 사용하기 좋습니다.",
-        "viewNow": "지금 보기",
-        "usage": {
-            "remainingAmount": "잔액",
-            "usedAmount": "사용액",
-            "todayRequests": "오늘 요청 수",
-            "todayTokens": "오늘 토큰 수",
-            "totalRequests": "총 요청 수",
-            "totalTokens": "총 토큰 수"
-        },
-        "keyManager": {
-            "title": "키 관리",
-            "desc": "자주 쓰는 API Key를 저장하세요. 클릭하면 전환되고 잔액을 자동으로 조회합니다.",
-            "lastRemainingLabel": "최근 잔액",
-            "lastRemaining": "${{value}}",
-            "notQueried": "조회 안 됨",
-            "addedAt": "추가일",
-            "empty": "저장된 키가 없습니다."
-        },
-        "queryTitle": "키 잔액 조회",
-        "apiKeyLabel": "API 키",
-        "apiKeyPlaceholder": "API Key를 붙여넣으세요...",
-        "queryButton": "새로고침",
-        "cli": {
-            "quickConfig": "원클릭 로컬 개발 설정",
-            "syncDesc": "공식 표준 설정으로 동기화",
-            "codexTooltip": "API Key와 BaseURL을 Antigravity Codex에 동기화",
-            "claudeTooltip": "API Key와 BaseURL을 Claude Code에 동기화",
-            "opencodeTooltip": "API Key, BaseURL, 모델을 OpenCode에 동기화"
-        },
-        "models": {
-            "title": "사용 가능한 모델",
-            "empty": "현재 API Key로 반환된 모델이 없습니다."
-        },
-        "errors": {
-            "parseFormat": "형식 파싱 오류: {{err}}",
-            "fetchFailed": "가져오기 실패: {{err}}",
-            "queryFailed": "유효한 잔액 또는 모델을 가져오지 못했습니다. API Key와 Base URL이 올바른지 확인하세요."
-        }
     },
     "suggestion_delete_thinking": {
         "title": "버전 업데이트 안내",

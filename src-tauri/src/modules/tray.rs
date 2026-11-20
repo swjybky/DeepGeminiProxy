@@ -376,14 +376,14 @@ pub fn create_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     let builder = TrayIconBuilder::with_id("main")
         .icon(icon)
-        .tooltip("Antigravity Manager")
+        .tooltip(&app.package_info().name)
         .icon_as_template(true);
 
     #[cfg(not(target_os = "macos"))]
     let builder = TrayIconBuilder::with_id("main")
         .menu(&menu)
         .icon(icon)
-        .tooltip("Antigravity Manager")
+        .tooltip(&app.package_info().name)
         .icon_as_template(false)
         .show_menu_on_left_click(false);
 
@@ -544,6 +544,7 @@ pub fn create_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
 
                             let integration = crate::modules::integration::DesktopIntegration {
                                 app_handle: app_handle.clone(),
+                                require_client_launch: false,
                             };
                             if let Ok(_) =
                                 modules::switch_account(&next_account.id, None, &integration).await
@@ -595,10 +596,8 @@ pub fn update_tray_menus(app: &tauri::AppHandle) {
 
         let mut menu_lines = Vec::new();
         let mut user_text = format!("{}: {}", texts.current, texts.no_account);
-        let mut tooltip_text = format!(
-            "Antigravity Manager\n{}: {}",
-            texts.current, texts.no_account
-        );
+        let app_name = &app_clone.package_info().name;
+        let mut tooltip_text = format!("{app_name}\n{}: {}", texts.current, texts.no_account);
         #[allow(unused_mut)]
         let mut macos_title: Option<String> = None;
 
@@ -617,8 +616,7 @@ pub fn update_tray_menus(app: &tauri::AppHandle) {
                     if q.is_forbidden {
                         let forbidden_msg = format!("🚫 {}", texts.forbidden);
                         menu_lines.push(forbidden_msg.clone());
-                        tooltip_text =
-                            format!("Antigravity Manager ({})\n{}", email_display, forbidden_msg);
+                        tooltip_text = format!("{app_name} ({email_display})\n{forbidden_msg}");
                         macos_title = Some("🚫".to_string());
                     } else {
                         let key_quotas = extract_key_model_quotas(&q.models);
@@ -658,8 +656,7 @@ pub fn update_tray_menus(app: &tauri::AppHandle) {
                             tooltip_parts.join(" | ")
                         };
 
-                        tooltip_text =
-                            format!("Antigravity Manager ({})\n{}", email_display, quota_summary);
+                        tooltip_text = format!("{app_name} ({email_display})\n{quota_summary}");
 
                         // macOS menu bar title (concise for status bar space)
                         macos_title = match (key_quotas.claude, key_quotas.gemini_pro) {
@@ -671,15 +668,12 @@ pub fn update_tray_menus(app: &tauri::AppHandle) {
                     }
                 } else {
                     menu_lines.push(texts.unknown_quota.clone());
-                    tooltip_text = format!(
-                        "Antigravity Manager ({})\n{}",
-                        email_display, texts.unknown_quota
-                    );
+                    tooltip_text = format!("{app_name} ({email_display})\n{}", texts.unknown_quota);
                 }
             } else {
                 user_text = format!("{}: Error", texts.current);
                 menu_lines.push(format!("{}: --", texts.quota));
-                tooltip_text = format!("Antigravity Manager\n{}: Error", texts.current);
+                tooltip_text = format!("{app_name}\n{}: Error", texts.current);
             }
         } else {
             menu_lines.push(texts.unknown_quota.clone());

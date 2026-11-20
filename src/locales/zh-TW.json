@@ -71,13 +71,14 @@
         "selected": "已選擇",
         "claude_series": "Claude 系列",
         "maximize": "最大化",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "複製到剪貼板"
     },
     "nav": {
         "dashboard": "儀表板",
         "accounts": "帳號管理",
         "proxy": "API 反向代理",
+        "agent_tools": "Agent 工具",
         "token_stats": "統計",
         "call_records": "流量日誌",
         "security": "IP 管理",
@@ -108,7 +109,6 @@
         "switch_to_malay": "切換到馬來語",
         "switch_to_malay_short": "MY",
         "user_token": "用戶 Token",
-        "apikey_fun": "Transit Station",
         "logout": "Logout",
         "more": "更多",
         "mini_view": "迷你懸浮窗"
@@ -252,6 +252,12 @@
         "pro": "PRO",
         "free": "FREE",
         "edit_label": "編輯標籤",
+        "activation": {
+            "title": "用此帳號啟動 Antigravity",
+            "current_account": "已登入此帳號",
+            "signed_in_as": "目前登入 {{email}}",
+            "no_account": "未偵測到登入帳號"
+        },
         "custom_label_placeholder": "輸入自訂標籤",
         "label_updated": "標籤已更新",
         "add_account": "新增帳號",
@@ -524,7 +530,7 @@
             "auto_launch": "開機自動啟動",
             "auto_launch_enabled": "啟用",
             "auto_launch_disabled": "停用",
-            "auto_launch_desc": "系統啟動時自動執行 Antigravity Tools",
+            "auto_launch_desc": "系統啟動時自動執行 DeepGeminiProxy",
             "quiet_autostart": "免打擾啟動（留在系統匣）",
             "quiet_autostart_desc": "開機自啟時不彈出主視窗。同時開啟輕量模式時，會直接釋放前端行程。手動開啟軟體仍會顯示主視窗；系統沒有系統匣時會改為顯示視窗。",
             "quiet_autostart_enabled": "已開啟免打擾啟動",
@@ -875,6 +881,17 @@
             "port_tooltip": "本地 API 代理監聽的通訊埠。需要先停止服務再修改，修改後需重啟生效。",
             "port_hint": "預設 8045，修改通訊埠需重啟服務",
             "auto_start": "跟隨應用自動啟動",
+            "enabled_models": {
+                "title": "啟用模型",
+                "fetch": "拉取模型清單",
+                "enable_all": "全部啟用",
+                "disable_all": "全部停用",
+                "all_enabled": "預設啟用全部模型，包括之後新增的模型。",
+                "selected": "已啟用 {{count}} 個模型",
+                "unsaved": "點擊上方「儲存」套用模型選擇。",
+                "fetch_failed": "拉取模型清單失敗：{{error}}",
+                "empty": "目前沒有可用模型。"
+            },
             "auto_start_tooltip": "應用啟動時自動啟動本地 API 代理服務。",
             "allow_lan_access": "允許區域網路存取",
             "allow_lan_access_tooltip": "開啟後繫結到 IPv6/IPv4 雙棧萬用位址（[::] / 0.0.0.0），區域網路及公網其他裝置均可存取。建議同時開啟鑑權並妥善保管 API 金鑰；修改後需重啟服務生效。",
@@ -884,6 +901,15 @@
             "allow_lan_access_restart_hint": "ℹ️ 需要重啟服務後生效",
             "api_key": "API 金鑰",
             "api_key_tooltip": "啟用鑑權後，客戶端存取代理所需的共享金鑰。重新生成會立即使舊金鑰失效。",
+            "model_base_url": {
+                "label": "模型 Base URL",
+                "protocol": "API 協定",
+                "address_type": "位址類型",
+                "local": "本機",
+                "lan": "區域網路",
+                "lan_unavailable": "未偵測到區域網路位址",
+                "lan_hint": "若要從其他裝置連線，請啟用「允許區域網路存取」並重新啟動服務。"
+            },
             "btn_regenerate": "重新生成金鑰",
             "btn_edit": "編輯",
             "btn_save": "保存",
@@ -1525,17 +1551,24 @@
             "copy_base": "複製 Base"
         },
         "cli_sync": {
+            "integration": {
+                "title": "Agent 連線",
+                "deepwrite_hint": "請先完全退出 DeepWrite（⌘Q）。開啟後，Gemini 模型會出現在自訂模型的 DeepGemini 群組中。",
+                "description": "開啟開關，自動設定閘道位址、金鑰和模型。",
+                "connection_changed": "連線設定已變更",
+                "key_required": "請先設定閘道 API 金鑰，再開啟 Agent 連線。",
+                "gateway_stopped": "閘道尚未啟動。啟動後，已連線的工具即可使用。",
+                "connected": "已連線",
+                "disconnected": "未連線",
+                "status_error": "設定偵測失敗",
+                "switch": "將 {{name}} 連線到閘道",
+                "disconnect_title": "中斷閘道連線",
+                "restore_message": "要中斷 {{name}} 的連線並還原備份或預設設定嗎？這可能覆蓋連線後對相關檔案的修改。",
+                "error": "連線設定更新失敗（{{error}}）"
+            },
             "title": "Agent工具一鍵配置",
             "subtitle": "快速將當前 API 服務地址與 API 密鑰同步到本地 AI Agent 工具中",
             "card_title": "{{name}} 配置",
-            "jeikcode_recommended": "推薦使用",
-            "jeikcode_badge": "Best Matched",
-            "jeikcode_author": "by Jeikl",
-            "jeikcode_tagline": "核心維護者深度打造 · 原生網關最佳兼容",
-            "jeikcode_tag_cache": "95%+ 恐怖快取",
-            "jeikcode_tag_codegraph": "代碼圖譜",
-            "jeikcode_tag_surpass": "超越 CC / Codex",
-            "jeikcode_tag_custom": "自由定製",
             "status": {
                 "not_installed": "未檢測到安裝",
                 "installed": "v{{version}}",
@@ -2339,66 +2372,6 @@
         "records_unit": "個記錄",
         "no_trend_data": "該時段內暫無走勢數據",
         "no_model_data": "暫無模型數據"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN 中轉站",
-        "eyebrow": "中轉站",
-        "double11Badge": "雙 11 特惠中",
-        "description": "Antigravity Tools 官方合作中轉站，提供穩定、開放、高性價比的大模型 API 服務。支援 Claude、OpenAI、Gemini 等主流模型。透過專屬連結註冊，可享最高充值永久 95 折優惠。",
-        "viewNow": "立即查看",
-        "usage": {
-            "remainingAmount": "剩餘額度",
-            "usedAmount": "已用額度",
-            "todayRequests": "今日請求",
-            "todayTokens": "今日 Token",
-            "totalRequests": "總請求",
-            "totalTokens": "總 Token"
-        },
-        "keyManager": {
-            "title": "金鑰管理",
-            "desc": "儲存常用 API Key，點擊即可切換並自動查詢額度。",
-            "lastRemainingLabel": "上次餘額",
-            "lastRemaining": "${{value}}",
-            "notQueried": "未查詢",
-            "addedAt": "新增於",
-            "empty": "暫無儲存的金鑰。"
-        },
-        "queryTitle": "金鑰額度查詢",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "貼上你的 API Key...",
-        "queryButton": "重新整理",
-        "cli": {
-            "quickConfig": "一鍵配置本地開發環境",
-            "syncDesc": "同步至官方標準配置",
-            "codexTooltip": "將 API Key 同步至 Antigravity Codex",
-            "claudeTooltip": "將 API Key 同步至 Claude Code",
-            "opencodeTooltip": "將 API Key、BaseURL 與模型同步至 OpenCode"
-        },
-        "models": {
-            "title": "可用模型",
-            "empty": "輸入 API Key 並查詢以取得可用模型清單。",
-            "emptyFromKey": "尚未取得模型。請點擊重新整理以取得模型清單。"
-        },
-        "errors": {
-            "parseFormat": "解析格式異常: {{err}}",
-            "fetchFailed": "取得失敗: {{err}}",
-            "queryFailed": "無法取得有效的額度資料，請確認 API Key 是否有效。"
-        },
-        "opencode": {
-            "modelsRequired": "請先重新整理此金鑰以載入可用模型，再啟用其 OpenCode 設定。",
-            "active": "已同步",
-            "modified": "有差異",
-            "inactive": "未啟用",
-            "syncedToast": "已同步至 OpenCode: {{name}}",
-            "removedToast": "已從 OpenCode 移除設定檔 {{name}}",
-            "clickToRemove": "OpenCode 設定檔已啟用且一致。點擊停用（移除設定檔）",
-            "clickToUpdate": "設定或模型存在差異。點擊更新",
-            "clickToActivate": "點擊以在 OpenCode 中啟用獨立設定檔",
-            "syncedActiveTooltip": "OpenCode: 設定完全相符（已啟用）。點擊停用／移除",
-            "partialTooltip": "OpenCode: 設定或模型存在差異。點擊同步"
-        },
-        "syncSuccess": "成功同步至 {{app}}",
-        "syncError": "同步失敗: {{error}}"
     },
     "errors": {
         "stream": {

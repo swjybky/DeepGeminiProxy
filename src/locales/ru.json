@@ -72,13 +72,14 @@
         "selected": "Selected",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "Скопировать в буфер"
     },
     "nav": {
         "dashboard": "Дашборд",
         "accounts": "Аккаунты",
         "proxy": "API Прокси",
+        "agent_tools": "Инструменты агентов",
         "call_records": "Логи трафика",
         "token_stats": "Статистика",
         "security": "Управление IP",
@@ -109,7 +110,6 @@
         "switch_to_malay": "Переключить на малайский",
         "switch_to_malay_short": "MY",
         "user_token": "Токены пользователей",
-        "apikey_fun": "Транзитная станция",
         "logout": "Выйти",
         "more": "More",
         "mini_view": "Mini View"
@@ -525,7 +525,7 @@
             "auto_launch": "Запуск при старте системы",
             "auto_launch_enabled": "Включено",
             "auto_launch_disabled": "Отключено",
-            "auto_launch_desc": "Автоматически запускать Antigravity Tools при старте системы",
+            "auto_launch_desc": "Автоматически запускать DeepGeminiProxy при старте системы",
             "quiet_autostart": "Тихий запуск (оставаться в трее)",
             "quiet_autostart_desc": "При запуске вместе с системой главное окно не показывается. Если также включён лёгкий режим, WebView сразу выгружается. Обычный запуск по-прежнему показывает окно. Если трей недоступен, окно будет показано.",
             "quiet_autostart_enabled": "Тихий запуск включён",
@@ -892,6 +892,15 @@
             "allow_lan_access_restart_hint": "ℹ️ Требуется перезапуск сервиса для применения изменений",
             "api_key": "API ключ",
             "api_key_tooltip": "Общий секрет, используемый клиентами, когда авторизация прокси включена. Перегенерация ключа немедленно аннулирует старый.",
+            "model_base_url": {
+                "label": "Базовый URL модели",
+                "protocol": "Протокол API",
+                "address_type": "Тип адреса",
+                "local": "Локальный",
+                "lan": "Локальная сеть",
+                "lan_unavailable": "Адрес локальной сети не обнаружен",
+                "lan_hint": "Для подключения с другого устройства разрешите доступ по локальной сети и перезапустите службу."
+            },
             "btn_regenerate": "Перегенерировать ключ",
             "btn_edit": "Редактировать",
             "btn_save": "Сохранить",
@@ -2302,65 +2311,6 @@
         "records_unit": "записей",
         "no_trend_data": "Нет данных о динамике за этот период",
         "no_model_data": "Нет данных по моделям"
-    },
-    "apiKeyFun": {
-        "title": "Хаб APIKEY.FUN",
-        "eyebrow": "Хаб",
-        "description": "Официальный партнерский хаб Antigravity Tools для стабильного и выгодного доступа к API больших моделей (Claude, OpenAI, Gemini). Подходит для конфигурации в Codex, Claude Code и других CLI.",
-        "viewNow": "Перейти",
-        "usage": {
-            "remainingAmount": "Остаток",
-            "usedAmount": "Использовано",
-            "todayRequests": "Запросов сегодня",
-            "todayTokens": "Токенов сегодня",
-            "totalRequests": "Всего запросов",
-            "totalTokens": "Всего токенов"
-        },
-        "keyManager": {
-            "title": "Управление ключами",
-            "desc": "Сохраняйте ключи для быстрого переключения и проверки баланса.",
-            "lastRemainingLabel": "Прошлый баланс",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Не проверялся",
-            "addedAt": "Добавлен",
-            "empty": "Нет сохраненных ключей."
-        },
-        "queryTitle": "Проверка баланса ключа",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Вставьте API-ключ...",
-        "queryButton": "Обновить",
-        "cli": {
-            "quickConfig": "Быстрая настройка окружения",
-            "syncDesc": "Синхронизация со стандартной конфигурацией",
-            "codexTooltip": "Синхронизировать API Key и BaseURL с Codex / ChatGPT CLI",
-            "claudeTooltip": "Синхронизировать API Key и BaseURL с Claude Code",
-            "opencodeTooltip": "Синхронизировать API Key, BaseURL и модели в OpenCode"
-        },
-        "models": {
-            "title": "Доступные модели",
-            "empty": "Введите ключ и нажмите «Обновить», чтобы загрузить список моделей.",
-            "emptyFromKey": "Модели еще не получены. Нажмите «Обновить» для загрузки списка моделей."
-        },
-        "errors": {
-            "parseFormat": "Ошибка формата ответа: {{err}}",
-            "fetchFailed": "Ошибка запроса: {{err}}",
-            "queryFailed": "Не удалось получить данные о балансе или моделях. Проверьте правильность ключа и адреса."
-        },
-        "opencode": {
-            "modelsRequired": "Обновите данные ключа, чтобы загрузить модели перед активацией профиля OpenCode.",
-            "active": "Активен",
-            "modified": "Изменен",
-            "inactive": "Нет профиля",
-            "syncedToast": "Синхронизировано с OpenCode: {{name}}",
-            "removedToast": "Удалено из OpenCode: {{name}}",
-            "clickToRemove": "OpenCode профиль активен и синхронизирован. Кликните для отключения",
-            "clickToUpdate": "Есть отличия в настройках. Кликните для обновления",
-            "clickToActivate": "Кликните для создания отдельного профиля в OpenCode",
-            "syncedActiveTooltip": "OpenCode: профиль активен и полностью синхронизирован. Кликните, чтобы отключить",
-            "partialTooltip": "OpenCode: настройки или модели отличаются. Кликните для синхронизации"
-        },
-        "syncSuccess": "Успешно синхронизировано с {{app}}",
-        "syncError": "Ошибка синхронизации: {{error}}"
     },
     "suggestion_delete_thinking": {
         "title": "Рекомендация по обновлению",

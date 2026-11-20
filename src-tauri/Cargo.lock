@@ -96,8 +96,9 @@ checksum = "34fde25430d87a9388dadbe6e34d7f72a462c8b43ac8d309b42b0a8505d7e2a5"
 
 [[package]]
 name = "antigravity-tools"
-version = "5.0.3"
+version = "1.0.0"
 dependencies = [
+ "aes",
  "aes-gcm",
  "anyhow",
  "async-stream",
@@ -124,6 +125,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "reqwest 0.13.2",
+ "ring",
  "rquest",
  "rquest-util",
  "rusqlite",
@@ -160,6 +162,7 @@ dependencies = [
  "url",
  "uuid",
  "yaml-rt",
+ "zeroize",
 ]
 
 [[package]]

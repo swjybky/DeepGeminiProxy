@@ -70,13 +70,14 @@
         "selected": "Selected",
         "claude_series": "Claude Series",
         "maximize": "Maximize",
-        "app_name": "Antigravity Tools",
+        "app_name": "DeepGeminiProxy",
         "copy_to_clipboard": "Salin ke papan keratan"
     },
     "nav": {
         "dashboard": "Papan Pemuka",
         "accounts": "Akaun",
         "proxy": "Proksi API",
+        "agent_tools": "Alat Ejen",
         "call_records": "Log Trafik",
         "token_stats": "Statistik Token",
         "settings": "Tetapan",
@@ -107,7 +108,6 @@
         "user_token": "Token Pengguna",
         "security": "IP Management",
         "security_logs": "IP Logs",
-        "apikey_fun": "Transit Station",
         "logout": "Logout",
         "more": "More",
         "mini_view": "Mini View"
@@ -523,7 +523,7 @@
             "auto_launch": "Lancar pada Permulaan",
             "auto_launch_enabled": "Diaktifkan",
             "auto_launch_disabled": "Dinyahaktifkan",
-            "auto_launch_desc": "Lancarkan Antigravity Tools secara automatik apabila sistem bermula",
+            "auto_launch_desc": "Lancarkan DeepGeminiProxy secara automatik apabila sistem bermula",
             "quiet_autostart": "Permulaan senyap (kekal di dulang)",
             "quiet_autostart_desc": "Apabila dilancarkan semasa sistem bermula, tetingkap utama kekal tersembunyi. Jika mod ringan juga dihidupkan, WebView dilepaskan serta-merta. Membuka aplikasi sendiri tetap memaparkan tetingkap. Jika dulang sistem tiada, tetingkap dipaparkan.",
             "quiet_autostart_enabled": "Permulaan senyap dihidupkan",
@@ -877,6 +877,15 @@
             "allow_lan_access_restart_hint": "ℹ️ Mulakan semula perkhidmatan diperlukan untuk menggunakan perubahan",
             "api_key": "Kunci API",
             "api_key_tooltip": "Rahsia dikongsi yang digunakan oleh klien apabila kebenaran proksi diaktifkan. Menjana semula kunci serta-merta membatalkan yang lama.",
+            "model_base_url": {
+                "label": "URL Asas Model",
+                "protocol": "Protokol API",
+                "address_type": "Jenis alamat",
+                "local": "Setempat",
+                "lan": "LAN",
+                "lan_unavailable": "Alamat LAN tidak dikesan",
+                "lan_hint": "Untuk menyambung dari peranti lain, benarkan akses LAN dan mulakan semula perkhidmatan."
+            },
             "btn_regenerate": "Jana Semula Kunci",
             "btn_edit": "Sunting",
             "btn_save": "Simpan",
@@ -2102,49 +2111,6 @@
         "records_unit": "rekod",
         "no_trend_data": "Tiada data trend dalam tempoh ini",
         "no_model_data": "Tiada data model tersedia"
-    },
-    "apiKeyFun": {
-        "title": "APIKEY.FUN Hub",
-        "eyebrow": "Hub",
-        "description": "The official Antigravity Tools API Hub, providing stable, open, and cost-effective large model API services. Supports mainstream models like Claude, OpenAI, and Gemini. Ideal for unified configuration in Codex, Gemini CLI, Claude Code, and other development tools.",
-        "viewNow": "View Now",
-        "usage": {
-            "remainingAmount": "Remaining",
-            "usedAmount": "Used",
-            "todayRequests": "Today's Requests",
-            "todayTokens": "Today's Tokens",
-            "totalRequests": "Total Requests",
-            "totalTokens": "Total Tokens"
-        },
-        "keyManager": {
-            "title": "Key Management",
-            "desc": "Save frequently used API Keys. Click to switch and query balance automatically.",
-            "lastRemainingLabel": "Last Balance",
-            "lastRemaining": "${{value}}",
-            "notQueried": "Not queried",
-            "addedAt": "Added at",
-            "empty": "No saved keys."
-        },
-        "queryTitle": "Key Quota Query",
-        "apiKeyLabel": "API Key",
-        "apiKeyPlaceholder": "Paste your API Key...",
-        "queryButton": "Refresh",
-        "cli": {
-            "quickConfig": "One-Click Local Dev Setup",
-            "syncDesc": "Sync to official standard configuration",
-            "codexTooltip": "Sync API Key & BaseURL to Antigravity Codex",
-            "claudeTooltip": "Sync API Key & BaseURL to Claude Code",
-            "opencodeTooltip": "Sync API Key, BaseURL and models to OpenCode"
-        },
-        "models": {
-            "title": "Available Models",
-            "empty": "No models returned for current API Key."
-        },
-        "errors": {
-            "parseFormat": "Parse format error: {{err}}",
-            "fetchFailed": "Fetch failed: {{err}}",
-            "queryFailed": "Failed to get valid quota or models. Please check if the API Key and Base URL are correct."
-        }
     },
     "security": {
         "title": "Security Monitor",

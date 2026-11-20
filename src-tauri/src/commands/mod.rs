@@ -241,14 +241,28 @@ pub async fn switch_account(
     proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
     account_id: String,
     target_ide: Option<String>,
+    launch_client: Option<bool>,
 ) -> Result<(), String> {
-    let service = modules::account_service::AccountService::new(
-        crate::modules::integration::SystemManager::Desktop(app.clone()),
-    );
+    let require_client_launch = launch_client.unwrap_or(false);
+    let agy_terminal = match (require_client_launch, target_ide.as_deref()) {
+        (true, Some("agy")) => Some(modules::process::prepare_agy_terminal()?),
+        (true, Some("classic" | "ide")) | (false, _) => None,
+        (true, _) => return Err("Select a client to launch".to_string()),
+    };
 
-    service
-        .switch_account(&account_id, target_ide.as_deref())
-        .await?;
+    let integration = modules::integration::DesktopIntegration {
+        app_handle: app.clone(),
+        require_client_launch,
+    };
+    modules::account::switch_account(&account_id, target_ide.as_deref(), &integration).await?;
+
+    let launch_result = if let Some(terminal) = agy_terminal {
+        modules::process::launch_agy_terminal(terminal)
+            .await
+            .map_err(|err| format!("Account switched, but Antigravity CLI could not launch: {err}"))
+    } else {
+        Ok(())
+    };
 
     // 同步托盘
     crate::modules::tray::update_tray_menus(&app);
@@ -256,7 +270,7 @@ pub async fn switch_account(
     // [FIX #820] Notify proxy to clear stale session bindings and reload accounts
     let _ = crate::commands::proxy::reload_proxy_accounts(proxy_state).await;
 
-    Ok(())
+    launch_result
 }
 
 /// 获取当前账号
@@ -523,6 +537,10 @@ pub async fn save_config(
 
     modules::save_app_config(&config)?;
 
+    if let Some(admin) = proxy_state.admin_server.read().await.as_ref() {
+        admin.axum_server.update_model_listing(&config.proxy).await;
+    }
+
     crate::modules::logger::set_internal_error_log_budget_bytes(
         config.proxy.internal_error_log_retention.budget_bytes(),
     );
@@ -576,11 +594,6 @@ pub async fn save_config(
     if let Some(instance) = instance_lock.as_ref() {
         // 更新模型映射
         instance.axum_server.update_mapping(&config.proxy).await;
-        // 更新仅暴露真实配额模型开关
-        instance
-            .axum_server
-            .update_only_raw_quota_models(config.proxy.only_raw_quota_models)
-            .await;
         // 更新上游代理
         instance
             .axum_server
@@ -638,10 +651,6 @@ pub async fn save_config(
     let admin_lock = proxy_state.admin_server.read().await;
     if let Some(admin) = admin_lock.as_ref() {
         admin.axum_server.update_mapping(&config.proxy).await;
-        admin
-            .axum_server
-            .update_only_raw_quota_models(config.proxy.only_raw_quota_models)
-            .await;
         admin
             .axum_server
             .update_proxy(config.proxy.upstream_proxy.clone())
@@ -1726,31 +1735,6 @@ pub async fn get_token_stats_account_trend_daily(
     days: i64,
 ) -> Result<Vec<crate::modules::token_stats::AccountTrendPoint>, String> {
     crate::modules::token_stats::get_account_trend_daily(days)
-}
-
-#[tauri::command]
-pub async fn query_transit_info(url: String, key: String) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let response = client
-        .get(&url)
-        .bearer_auth(key)
-        .header(reqwest::header::ACCEPT, "application/json")
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let status = response.status();
-    let text = response.text().await.map_err(|e| e.to_string())?;
-
-    if status.is_success() {
-        Ok(text)
-    } else {
-        Err(format!("HTTP {}: {}", status, text))
-    }
 }
 
 /// 优雅关闭网关服务并退出应用

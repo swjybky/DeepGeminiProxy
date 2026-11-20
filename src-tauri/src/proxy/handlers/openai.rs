@@ -6099,6 +6099,7 @@ pub async fn handle_images_generations_internal(
         Some(model),
         &state.custom_mapping,
         &state.token_manager,
+        &state.enabled_models,
     )
     .await
     .rejection()
@@ -6744,6 +6745,7 @@ pub async fn handle_images_edits(
         Some(model.as_str()),
         &state.custom_mapping,
         &state.token_manager,
+        &state.enabled_models,
     )
     .await
     .rejection()

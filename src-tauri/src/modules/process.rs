@@ -1949,6 +1949,115 @@ pub fn get_antigravity_cli_executable_path() -> Option<std::path::PathBuf> {
     None
 }
 
+#[cfg(target_os = "macos")]
+pub type AgyTerminal = std::path::PathBuf;
+#[cfg(not(target_os = "macos"))]
+pub type AgyTerminal = tokio::process::Command;
+
+/// Prepare the terminal before switching credentials so missing executables fail early.
+pub fn prepare_agy_terminal() -> Result<AgyTerminal, String> {
+    let agy = get_antigravity_cli_executable_path()
+        .filter(|path| path.is_file())
+        .ok_or_else(|| "Antigravity CLI (agy) executable not found".to_string())?;
+    let agy = std::path::absolute(agy).map_err(|err| format!("Invalid agy path: {err}"))?;
+
+    #[cfg(target_os = "macos")]
+    {
+        Ok(agy)
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
+        let mut command = AgyTerminal::new(agy);
+        command.creation_flags(CREATE_NEW_CONSOLE);
+        if let Some(home) = dirs::home_dir() {
+            command.current_dir(home);
+        }
+        Ok(command)
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        for (terminal, option) in [
+            ("x-terminal-emulator", "-e"),
+            ("gnome-terminal", "--"),
+            ("konsole", "-e"),
+            ("xfce4-terminal", "-x"),
+            ("xterm", "-e"),
+        ] {
+            if let Some(executable) = std::env::split_paths(&path)
+                .map(|dir| dir.join(terminal))
+                .find(|path| path.is_file())
+            {
+                let mut command = AgyTerminal::new(executable);
+                command.arg(option).arg(agy);
+                clean_appimage_env(command.as_std_mut());
+                if let Some(home) = dirs::home_dir() {
+                    command.current_dir(home);
+                }
+                return Ok(command);
+            }
+        }
+        Err("No supported terminal emulator found for Antigravity CLI".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+pub async fn launch_agy_terminal(agy: AgyTerminal) -> Result<(), String> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    // Launch Services opens the script in Terminal without Apple Events permission.
+    let script = std::env::temp_dir().join(format!("antigravity-{}.command", uuid::Uuid::new_v4()));
+    let binary = agy
+        .to_str()
+        .ok_or_else(|| "Invalid agy executable path".to_string())?;
+    let quoted_binary = binary.replace('\'', "'\\''");
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o700)
+        .open(&script)
+        .map_err(|err| format!("Could not create CLI launch script: {err}"))?;
+    let written = writeln!(
+        file,
+        "#!/bin/sh\n/bin/rm -f -- \"$0\"\nexec '{quoted_binary}'"
+    );
+    drop(file);
+    if let Err(err) = written {
+        let _ = std::fs::remove_file(&script);
+        return Err(format!("Could not write CLI launch script: {err}"));
+    }
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio::process::Command::new("/usr/bin/open")
+            .args(["-a", "Terminal"])
+            .arg(&script)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await;
+    match output {
+        Ok(Ok(output)) if output.status.success() => Ok(()),
+        result => {
+            let _ = std::fs::remove_file(&script);
+            Err(match result {
+                Ok(Ok(output)) => String::from_utf8_lossy(&output.stderr).trim().to_string(),
+                Ok(Err(err)) => err.to_string(),
+                Err(_) => "Terminal launch timed out".to_string(),
+            })
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub async fn launch_agy_terminal(mut command: AgyTerminal) -> Result<(), String> {
+    command.spawn().map(|_| ()).map_err(|err| err.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
