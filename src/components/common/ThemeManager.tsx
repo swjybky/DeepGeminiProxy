@@ -3,7 +3,7 @@ import { useEffect } from 'react';
 import { useConfigStore } from '../../stores/useConfigStore';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-import { isLinux } from '../../utils/env';
+import { isLinux, isMiniWindow } from '../../utils/env';
 
 export default function ThemeManager() {
     const { config, loadConfig } = useConfigStore();
@@ -14,13 +14,11 @@ export default function ThemeManager() {
             await loadConfig();
             // Show window after a short delay to ensure React has painted (main window only)
             setTimeout(async () => {
-                if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__) {
+                if (typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ && !isMiniWindow()) {
                     const win = getCurrentWindow();
-                    if (win.label !== 'mini') {
-                        await win.show();
-                        await win.unminimize().catch(() => {});
-                        await win.setFocus().catch(() => {});
-                    }
+                    await win.show();
+                    await win.unminimize().catch(() => {});
+                    await win.setFocus().catch(() => {});
                 }
             }, 100);
         };
@@ -34,7 +32,7 @@ export default function ThemeManager() {
         const applyTheme = async (theme: string) => {
             const root = document.documentElement;
             const isDark = theme === 'dark';
-            const isMini = typeof window !== 'undefined' && (window as any).__TAURI_INTERNALS__ && getCurrentWindow().label === 'mini';
+            const isMini = isMiniWindow();
 
             // Set Tauri window background color
             // Skip on Linux due to crash with transparent windows + softbuffer

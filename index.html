@@ -9,8 +9,11 @@
   <script>
     (function () {
       try {
-        const isMini = window.location.search.includes('mini') || 
-                       (typeof window !== 'undefined' && window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label === 'mini');
+        // Keep in sync with isMiniWindow() in src/utils/env.ts.
+        const label = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+        const isMini = typeof label === 'string'
+          ? label === 'mini'
+          : new URLSearchParams(window.location.search).get('mini') === '1';
         if (isMini) {
           document.documentElement.classList.add('mini-window');
           document.documentElement.style.backgroundColor = 'transparent';

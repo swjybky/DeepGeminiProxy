@@ -6,6 +6,17 @@ export const isTauri = () => {
         (!!(window as any).__TAURI_INTERNALS__ || !!(window as any).__TAURI__);
 };
 
+/** Keep in sync with the pre-paint check in index.html. */
+export function isMiniWindow(): boolean {
+    if (typeof window === 'undefined') return false;
+
+    // Native window identity wins over any query string used for page routing.
+    const label = (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+    if (typeof label === 'string') return label === 'mini';
+
+    return new URLSearchParams(window.location.search).get('mini') === '1';
+}
+
 /**
  * Detect if running on Linux
  */

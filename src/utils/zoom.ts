@@ -1,6 +1,6 @@
 // UI & Font Scale Manager (Zoom Levels, Native Tauri Support & Persistence)
 
-import { isTauri } from './env';
+import { isMiniWindow, isTauri } from './env';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 
 export const ZOOM_LEVELS = [85, 90, 100, 110, 120, 130, 140, 150];
@@ -25,17 +25,6 @@ export function snapToClosestZoom(val: number): number {
     return closest;
 }
 
-/**
- * The mini overlay (`index.html?mini=1`) is a fixed 360x360 floating panel whose
- * children rely on fixed pixel sizes and `overflow-hidden`. It must never inherit
- * the main window's zoom, otherwise its layout gets clipped.
- */
-export function isMiniWindow(): boolean {
-    if (typeof window === 'undefined') return false;
-    if (window.location.search.includes('mini')) return true;
-    return (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === 'mini';
-}
-
 export function getStoredZoom(): number {
     if (typeof window === 'undefined') return DEFAULT_ZOOM;
     try {
@@ -57,7 +46,7 @@ export function applyZoom(level: number, notify = true): void {
         return;
     }
 
-    // Act narrowly: only the main window participates in UI scaling.
+    // The fixed-size Mini View must not inherit the main window's zoom.
     if (isMiniWindow()) {
         return;
     }

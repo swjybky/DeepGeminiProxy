@@ -21,11 +21,10 @@ import { useAccountStore } from './stores/useAccountStore';
 import { useViewStore } from './stores/useViewStore';
 import { useTranslation } from 'react-i18next';
 import { listen } from '@tauri-apps/api/event';
-import { isTauri } from './utils/env';
+import { isMiniWindow, isTauri } from './utils/env';
 import { request as invoke } from './utils/request';
 import { AdminAuthGuard } from './components/common/AdminAuthGuard';
 import MiniView from './components/layout/MiniView';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const router = createBrowserRouter([
   {
@@ -289,20 +288,7 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  const isMini =
-    (typeof window !== 'undefined' && window.location.search.includes('mini')) ||
-    (typeof window !== 'undefined' &&
-      (window as any).__TAURI_INTERNALS__?.metadata?.currentWindow?.label === 'mini') ||
-    (isTauri() &&
-      (() => {
-        try {
-          return getCurrentWindow().label === 'mini';
-        } catch {
-          return false;
-        }
-      })());
-
-  if (isMini) {
+  if (isMiniWindow()) {
     if (typeof document !== 'undefined') {
       document.documentElement.classList.add('mini-window');
       document.documentElement.style.setProperty('background-color', 'transparent', 'important');
