@@ -120,6 +120,49 @@ pub(crate) struct AccountView {
     id: Uuid,
     email: String,
     needs_login: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) terms: Option<TermsView>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(super) last_error: Option<ModelErrorView>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(super) struct TermsView {
+    pub(super) status: TermsStatus,
+    version: Option<u32>,
+    accepted_at: Option<String>,
+    operation: Option<TermsOperation>,
+    diagnostic: Option<UpstreamDiagnostic>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum TermsStatus {
+    Unknown,
+    Accepted,
+    Error,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum TermsOperation {
+    Version,
+    Accept,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(super) struct ModelErrorView {
+    pub(super) code: String,
+    model: Option<String>,
+    at: u64,
+    pub(super) diagnostic: Option<UpstreamDiagnostic>,
+}
+
+#[derive(Deserialize, Serialize)]
+pub(super) struct UpstreamDiagnostic {
+    upstream_http_status: Option<u16>,
+    pub(super) grpc_status: Option<u8>,
+    pub(super) message: Option<String>,
 }
 
 #[derive(Clone, Copy, Deserialize, Serialize)]
@@ -248,6 +291,8 @@ impl Pool {
             .map(|account| AccountView {
                 id: account.saved.id,
                 email: account.saved.email.clone(),
+                terms: None,
+                last_error: None,
                 needs_login: account.saved.needs_login
                     || profile.is_none_or(|p| p.id != account.saved.client_id),
             })

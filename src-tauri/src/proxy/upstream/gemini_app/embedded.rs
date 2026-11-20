@@ -264,6 +264,63 @@ async fn embedded_runtime_starts_and_owns_the_login_flow() {
     second.stop().await;
 }
 
+#[cfg(test)]
+#[tokio::test]
+#[ignore = "requires npm run app2api:prepare on the host architecture"]
+async fn embedded_terms_diagnostic_is_redacted_and_consent_is_explicit() {
+    let work = tempfile::tempdir().unwrap();
+    let data = work.path().canonicalize().unwrap().join("state");
+    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("resources/app2api-runtime");
+    let engine = Embedded::new(runtime, data.clone());
+    assert!(engine.accounts().await.unwrap().is_empty());
+    engine.stop().await;
+    let path = data.join("state.json");
+    let mut state: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    state["accounts"] = serde_json::json!([{
+        "id": "acc_0123456789abcdef1234", "label": "account@example.test", "enabled": true,
+        "status": "auth_error", "lastError": {
+            "at": 123456, "status": 502, "code": "NATIVE_PRECONDITION_REQUIRED", "model": "gemini-neon",
+            "nativeEvidence": {"upstreamHttpStatus": 200, "grpcStatus": 9,
+                "upstreamMessage": "Please accept our terms of service. fixture@example.test Bearer synthetic-fixture"}
+        }
+    }]);
+    let fixture = serde_json::to_vec(&state).unwrap();
+    std::fs::write(&path, &fixture).unwrap();
+    let accounts = engine.accounts().await.unwrap();
+    let account = &accounts[0];
+    assert_eq!(
+        account.terms.as_ref().unwrap().status,
+        super::accounts::TermsStatus::Unknown
+    );
+    let error = account.last_error.as_ref().unwrap();
+    assert_eq!(error.code, "NATIVE_PRECONDITION_REQUIRED");
+    let diagnostic = error.diagnostic.as_ref().unwrap();
+    assert_eq!(diagnostic.grpc_status, Some(9));
+    let message = diagnostic.message.as_deref().unwrap();
+    assert!(message.contains("Please accept our terms of service."));
+    assert!(!message.contains("fixture@example.test") && !message.contains("synthetic-fixture"));
+
+    let id = Uuid::parse_str("00000000-0000-0123-4567-89abcdef1234").unwrap();
+    let gateway = engine.gateway().await.unwrap();
+    let rejected = gateway
+        .control::<serde_json::Value>(
+            reqwest::Method::POST,
+            &format!("/__dgp/accounts/{id}/terms"),
+        )
+        .await;
+    assert_eq!(
+        rejected.err(),
+        Some("gemini_app_terms_confirmation_required")
+    );
+    assert_eq!(
+        gateway.confirm_terms(id).await.err(),
+        Some("gemini_app_terms_login_required")
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), fixture);
+    engine.stop().await;
+}
+
 pub(super) fn public_error(code: &str) -> &'static str {
     match code {
         "account_limit" => "account_limit",
@@ -275,6 +332,10 @@ pub(super) fn public_error(code: &str) -> &'static str {
         "oauth_listener_unavailable" => "oauth_listener_unavailable",
         "oauth_refresh_token_missing" => "oauth_refresh_token_missing",
         "oauth_denied" => "oauth_denied",
+        "gemini_app_terms_confirmation_required" => "gemini_app_terms_confirmation_required",
+        "gemini_app_terms_login_required" => "gemini_app_terms_login_required",
+        "gemini_app_terms_timeout" => "gemini_app_terms_timeout",
+        "gemini_app_terms_version_missing" => "gemini_app_terms_version_missing",
         _ => BAD_RESPONSE,
     }
 }

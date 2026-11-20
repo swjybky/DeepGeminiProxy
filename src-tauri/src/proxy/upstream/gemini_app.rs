@@ -175,6 +175,20 @@ impl GeminiApp {
             None => Ok(self.accounts()),
         }
     }
+    pub(crate) async fn managed_confirm_terms(
+        &self,
+        id: uuid::Uuid,
+        confirmed: bool,
+    ) -> Result<AccountView, &'static str> {
+        if !confirmed {
+            return Err("gemini_app_terms_confirmation_required");
+        }
+        let engine = self
+            .embedded
+            .as_ref()
+            .ok_or("gemini_app_terms_unsupported")?;
+        engine.gateway().await?.confirm_terms(id).await
+    }
     pub(crate) async fn managed_remove(&self, id: uuid::Uuid) -> Result<(), &'static str> {
         match &self.embedded {
             Some(engine) => engine.remove_account(id).await,

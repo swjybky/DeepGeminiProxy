@@ -3,6 +3,11 @@
 > DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.2 (2026-11-20)**:
+        -   安装包内置 Gemini App2API 和 Node.js。应用按需启动引擎，无需另装软件或配置网关 API Key。
+        -   Gemini App 账号卡片支持手动确认服务条款。Google 明确要求接受条款时，可用现有账号提交；登录时不会自动同意。
+        -   展示脱敏后的 Google 错误详情，区分条款版本查询、条款提交和模型请求失败。
+
     *   **v1.0.1 (2026-11-19)**:
         -   新增独立的 Gemini App 账号池和模型路由。Chat Completions 与 Responses 可接入本机 App2API；内置直接授权需要获准的 OAuth 配置。
         -   修复反重力模型目录冷启动时缺少档位的问题，并按模型系列整理白名单；未指定档位时优先选择可用的 High 档。

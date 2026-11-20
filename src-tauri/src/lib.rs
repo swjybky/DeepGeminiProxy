@@ -792,6 +792,7 @@ pub fn run() {
             commands::gemini_app::gemini_app_login_status,
             commands::gemini_app::gemini_app_login_cancel,
             commands::gemini_app::gemini_app_account_remove,
+            commands::gemini_app::gemini_app_confirm_terms,
             commands::prepare_oauth_url,
             commands::start_oauth_login,
             commands::complete_oauth_login,

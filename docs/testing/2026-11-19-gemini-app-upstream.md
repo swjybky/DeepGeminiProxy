@@ -19,4 +19,6 @@
 
 内置 App2API 模式（macOS arm64）：`npm run app2api:prepare` 校验固定源码并准备运行时。`cargo test --manifest-path src-tauri/Cargo.toml --locked --lib embedded_runtime_starts_and_owns_the_login_flow -- --ignored` 通过：实际启动随包引擎，验证单实例文件锁、禁止独立后台、空账号请求返回 503、可发起和取消本机 OAuth 流程、退出后可重新获取锁。`npm run tauri build -- --debug --ci --bundles app --config '{"bundle":{"createUpdaterArtifacts":false}}' -- --locked` 成功生成 `DeepGeminiProxy.app`；确认包内 Node.js 可运行且两份许可证齐全。15 项定向 Rust 回归、格式检查和 `git diff --check` 通过。
 
-未覆盖：未登录真实 Google 账号或调用真实模型，未验证 Windows/Linux/Docker 产物、已鉴权的 Web/Tauri 控件或目标 SDK。未改变布局，未做视觉验收。启用方式见[上游接入说明](../proxy/gemini-app.md)。
+条款确认与诊断（macOS arm64）：15 项 Rust 定向测试和 2 项内置运行时测试通过。运行时集成测试验证上游消息脱敏、缺少确认和账号授权失效时拒绝且不写文件；用临时合成账号和 stub 验证只有经认证且明确确认的提交才更新条款状态。前端构建、macOS `.app` 重打包、格式检查和 `git diff --check` 通过。
+
+未覆盖：未登录真实 Google 账号、提交真实条款确认或调用真实模型；未验证 Windows/Linux/Docker 产物、已鉴权的 Web/Tauri 控件、视觉或目标 SDK。启用方式见[上游接入说明](../proxy/gemini-app.md)。

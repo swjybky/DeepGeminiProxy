@@ -1,11 +1,13 @@
 import { Mail, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { GeminiAppAccount } from '../../stores/useGeminiAppAccounts';
+import { GeminiAppTerms } from './GeminiAppTerms';
 
 export function GeminiAppAccountInfo({ account, onRemove }: { account: GeminiAppAccount; onRemove?: () => void }) {
     const { t } = useTranslation();
     const prefix = 'accounts.add.gemini_app';
-    return <div className="flex items-center gap-3 justify-between min-w-0">
+    return <div className="min-w-0">
+        <div className="flex items-center gap-3 justify-between min-w-0">
         <div className="min-w-0 space-y-1">
             <div className="flex min-w-0 items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-200">
                 <Mail className="h-3.5 w-3.5 shrink-0 text-gray-400" aria-hidden="true" />
@@ -17,5 +19,7 @@ export function GeminiAppAccountInfo({ account, onRemove }: { account: GeminiApp
             </div>
         </div>
         {onRemove && <button type="button" aria-label={t(`${prefix}.remove`)} title={t(`${prefix}.remove`)} className="shrink-0 rounded-lg p-2 text-gray-500 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/25" onClick={onRemove}><Trash2 className="h-4 w-4" aria-hidden="true" /></button>}
+        </div>
+        <GeminiAppTerms account={account} />
     </div>;
 }

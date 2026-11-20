@@ -935,6 +935,10 @@ impl AxumServer {
                 delete(crate::commands::gemini_app::web_remove),
             )
             .route(
+                "/accounts/gemini-app/:id/terms",
+                post(crate::commands::gemini_app::web_confirm_terms),
+            )
+            .route(
                 "/accounts/gemini-app/login",
                 post(crate::commands::gemini_app::web_start),
             )

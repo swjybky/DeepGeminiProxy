@@ -155,6 +155,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   'gemini_app_login_status': { url: '/api/accounts/gemini-app/login/:id', method: 'GET' },
   'gemini_app_login_cancel': { url: '/api/accounts/gemini-app/login/:id', method: 'DELETE' },
   'gemini_app_account_remove': { url: '/api/accounts/gemini-app/:id', method: 'DELETE' },
+  'gemini_app_confirm_terms': { url: '/api/accounts/gemini-app/:id/terms', method: 'POST' },
   'prepare_oauth_url': { url: '/api/auth/url', method: 'GET' },
   'start_oauth_login': { url: '/api/accounts/oauth/start', method: 'POST' },
   'complete_oauth_login': { url: '/api/accounts/oauth/complete', method: 'POST' },

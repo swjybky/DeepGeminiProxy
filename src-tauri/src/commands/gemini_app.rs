@@ -36,6 +36,22 @@ pub(crate) async fn gemini_app_account_remove(id: Uuid) -> Result<(), &'static s
     GeminiApp::shared()?.managed_remove(id).await
 }
 
+#[tauri::command]
+pub(crate) async fn gemini_app_confirm_terms(
+    id: Uuid,
+    confirmed: bool,
+) -> Result<AccountView, &'static str> {
+    GeminiApp::shared()?
+        .managed_confirm_terms(id, confirmed)
+        .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ConfirmTermsRequest {
+    confirmed: bool,
+}
+
 type WebError = (StatusCode, Json<Value>);
 fn web_provider(state: AppState) -> Result<Arc<GeminiApp>, WebError> {
     state
@@ -49,8 +65,15 @@ fn web_error(code: &'static str) -> WebError {
         | "account_store_unavailable"
         | "gemini_app_embedded_unavailable"
         | "gemini_app_embedded_in_use" => StatusCode::SERVICE_UNAVAILABLE,
-        "oauth_login_pending" | "gemini_app_gateway_managed" => StatusCode::CONFLICT,
-        "oauth_flow_not_found" => StatusCode::NOT_FOUND,
+        "oauth_login_pending"
+        | "gemini_app_gateway_managed"
+        | "gemini_app_terms_login_required" => StatusCode::CONFLICT,
+        "oauth_flow_not_found" | "account_not_found" => StatusCode::NOT_FOUND,
+        "gemini_app_terms_unsupported" => StatusCode::NOT_IMPLEMENTED,
+        "gemini_app_terms_timeout" => StatusCode::GATEWAY_TIMEOUT,
+        "gemini_app_terms_version_missing" | "gemini_app_embedded_request_failed" => {
+            StatusCode::BAD_GATEWAY
+        }
         _ => StatusCode::BAD_REQUEST,
     };
     (status, Json(json!({"error": code})))
@@ -97,6 +120,18 @@ pub(crate) async fn web_cancel(
         .map_err(web_error)?;
     Ok(StatusCode::NO_CONTENT)
 }
+pub(crate) async fn web_confirm_terms(
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(request): Json<ConfirmTermsRequest>,
+) -> Result<Json<AccountView>, WebError> {
+    web_provider(state)?
+        .managed_confirm_terms(id, request.confirmed)
+        .await
+        .map(Json)
+        .map_err(web_error)
+}
+
 pub(crate) async fn web_remove(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,

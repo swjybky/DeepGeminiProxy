@@ -3,6 +3,11 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.2 (2026-11-20)**:
+        -   Installers now bundle Gemini App2API and Node.js. The app starts the engine on demand; no separate install or gateway API key is required.
+        -   Gemini App account cards let users explicitly accept service terms on an existing account when Google requires it. Signing in does not accept terms automatically.
+        -   Redacted Google diagnostics distinguish terms version lookup, terms acceptance, and model request failures.
+
     *   **v1.0.1 (2026-11-19)**:
         -   Added a separate Gemini App account pool and model routing. Chat Completions and Responses can connect through a local App2API gateway; built-in sign-in requires an authorized OAuth configuration.
         -   Fixed missing Antigravity model tiers on cold start and grouped the allowlist by model family. When no tier is requested, routing prefers High if available.

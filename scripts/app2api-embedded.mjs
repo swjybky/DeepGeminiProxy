@@ -40,16 +40,66 @@ const safeErrors = Object.freeze({
   OAUTH_LISTENER_UNAVAILABLE: 'oauth_listener_unavailable',
   REFRESH_TOKEN_REQUIRED: 'oauth_refresh_token_missing',
   STATE_SAVE_FAILED: 'account_store_unavailable',
+  CONFIRMATION_REQUIRED: 'gemini_app_terms_confirmation_required',
+  ACCOUNT_LOGIN_REQUIRED: 'gemini_app_terms_login_required',
+  TOS_TIMEOUT: 'gemini_app_terms_timeout',
+  TOS_VERSION_MISSING: 'gemini_app_terms_version_missing',
 });
 
-function privateRequest(accounts, method, url) {
+function diagnostics(evidence) {
+  if (!evidence) return null;
+  // Accounts.list() already applies App2API's upstream message redaction.
+  return {
+    upstream_http_status: evidence.upstreamHttpStatus ?? null,
+    grpc_status: evidence.grpcStatus ?? null,
+    message: evidence.upstreamMessage ?? null,
+  };
+}
+
+function accountView(account) {
+  const terms = account.terms;
+  const failure = account.lastError;
+  return {
+    // Keep the Rust/Web account DTO stable while App2API owns its IDs.
+    id: account.id.replace(/^acc_([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/, '00000000-0000-$1-$2-$3'),
+    email: account.label,
+    needs_login: !account.enabled || account.authenticationStatus !== 'signed_in',
+    terms: {
+      status: terms.status,
+      version: terms.version,
+      accepted_at: terms.acceptedAt,
+      operation: terms.evidence?.operation ?? null,
+      diagnostic: diagnostics(terms.evidence),
+    },
+    last_error: failure ? {
+      code: failure.code,
+      model: failure.model ?? null,
+      at: failure.at,
+      diagnostic: diagnostics(failure.nativeEvidence),
+    } : null,
+  };
+}
+
+async function readConfirmation(req) {
+  const invalid = () => Object.assign(new Error('Explicit confirmation required'), { code: 'CONFIRMATION_REQUIRED', status: 400 });
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    bytes += chunk.length;
+    if (bytes > 1024) throw invalid();
+    chunks.push(chunk);
+  }
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    if (body?.confirmed === true && Object.keys(body).length === 1) return;
+  } catch { /* Missing or malformed JSON is never consent. */ }
+  throw invalid();
+}
+
+async function privateRequest(accounts, req, res) {
+  const { method, url = '' } = req;
   if (method === 'GET' && url === '/__dgp/accounts') {
-    return accounts.list().map(account => ({
-      // Keep the existing Rust/Web account DTO stable while App2API owns its IDs.
-      id: account.id.replace(/^acc_([0-9a-f]{4})([0-9a-f]{4})([0-9a-f]{12})$/, '00000000-0000-$1-$2-$3'),
-      email: account.label,
-      needs_login: !account.enabled || account.authenticationStatus !== 'signed_in',
-    }));
+    return accounts.list().map(accountView);
   }
   if (method === 'POST' && url === '/__dgp/login') {
     return accounts.beginLogin(undefined, { acceptTerms: false }).then(flow => ({
@@ -67,10 +117,31 @@ function privateRequest(accounts, method, url) {
     catch (error) { if (error?.code !== 'LOGIN_NOT_FOUND') throw error; }
     return null;
   }
-  const account = /^\/__dgp\/accounts\/00000000-0000-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})$/.exec(url);
-  if (account && method === 'DELETE') {
-    accounts.remove(`acc_${account.slice(1).join('')}`);
-    return null;
+  const account = /^\/__dgp\/accounts\/00000000-0000-([0-9a-f]{4})-([0-9a-f]{4})-([0-9a-f]{12})(\/terms)?$/.exec(url);
+  if (account) {
+    const id = `acc_${account.slice(1, 4).join('')}`;
+    if (method === 'DELETE' && !account[4]) {
+      accounts.remove(id);
+      return null;
+    }
+    if (method === 'POST' && account[4]) {
+      await readConfirmation(req);
+      const current = accounts.list().find(entry => entry.id === id);
+      if (!current) throw Object.assign(new Error('Account not found'), { code: 'ACCOUNT_NOT_FOUND', status: 404 });
+      if (!current.enabled || current.authenticationStatus !== 'signed_in') {
+        throw Object.assign(new Error('Account sign-in required'), { code: 'ACCOUNT_LOGIN_REQUIRED', status: 409 });
+      }
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      res.once('close', abort);
+      try {
+        if (res.destroyed) controller.abort();
+        await accounts.acceptTerms(id, { confirmed: true, signal: controller.signal });
+        return accountView(accounts.list().find(entry => entry.id === id));
+      } finally {
+        res.off('close', abort);
+      }
+    }
   }
   throw Object.assign(new Error('Not found'), { status: 404 });
 }
@@ -108,7 +179,7 @@ input.once('line', async key => {
         return serve(req, res);
       }
       try {
-        json(res, 200, await privateRequest(gateway.accounts, req.method, req.url ?? ''));
+        json(res, 200, await privateRequest(gateway.accounts, req, res));
       } catch (error) {
         const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
         json(res, status, { error: safeErrors[error?.code] ?? 'gemini_app_embedded_request_failed' });

@@ -1,5 +1,5 @@
 cask "antigravity-tools" do
-  version "1.0.1"
+  version "1.0.2"
   sha256 :no_check
 
   name "DeepGeminiProxy"

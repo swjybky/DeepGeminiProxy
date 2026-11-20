@@ -84,7 +84,32 @@ impl Gateway {
         method: reqwest::Method,
         path: &str,
     ) -> Result<T, &'static str> {
-        let response = self
+        self.control_request(method, path, None, Duration::from_secs(8))
+            .await
+    }
+
+    pub(super) async fn confirm_terms(
+        &self,
+        id: uuid::Uuid,
+    ) -> Result<super::AccountView, &'static str> {
+        // App2API bounds version lookup + acceptance + refresh at 35 seconds.
+        self.control_request(
+            reqwest::Method::POST,
+            &format!("/__dgp/accounts/{id}/terms"),
+            Some(serde_json::json!({"confirmed": true})),
+            Duration::from_secs(45),
+        )
+        .await
+    }
+
+    async fn control_request<T: serde::de::DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        json: Option<Value>,
+        timeout: Duration,
+    ) -> Result<T, &'static str> {
+        let mut request = self
             .client
             .request(
                 method,
@@ -93,10 +118,17 @@ impl Gateway {
                     .map_err(|_| "gemini_app_embedded_request_failed")?,
             )
             .header(header::AUTHORIZATION, self.authorization.clone())
-            .timeout(Duration::from_secs(8))
-            .send()
-            .await
-            .map_err(|_| "gemini_app_embedded_unavailable")?;
+            .timeout(timeout);
+        if let Some(json) = json {
+            request = request.json(&json);
+        }
+        let response = request.send().await.map_err(|err| {
+            if err.is_timeout() && timeout > Duration::from_secs(8) {
+                "gemini_app_terms_timeout"
+            } else {
+                "gemini_app_embedded_unavailable"
+            }
+        })?;
         if response.status().is_success() {
             response
                 .json()

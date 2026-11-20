@@ -4,6 +4,7 @@ import { Check, CheckCircle2, Copy, Globe, Info, Loader2 } from 'lucide-react';
 import { request } from '../../utils/request';
 import { copyToClipboard } from '../../utils/clipboard';
 import { useGeminiAppAccounts } from '../../stores/useGeminiAppAccounts';
+import { GeminiAppTerms } from './GeminiAppTerms';
 import { isTauri } from '../../utils/env';
 
 interface Flow { flow_id: string; authorization_url: string }
@@ -161,6 +162,7 @@ export default function GeminiAppTab() {
                             <div className="min-w-0 break-all"><div>{account.email}</div><div className="text-xs opacity-75">{t(`${prefix}.${account.needs_login ? 'needs_login' : 'authorized'}`)}</div></div>
                             <button type="button" className="btn btn-ghost btn-xs" disabled={busy || Boolean(flow)} onClick={() => setConfirmId(account.id)}>{t(`${prefix}.remove`)}</button>
                         </div>
+                        <GeminiAppTerms account={account} disabled={busy || Boolean(flow)} />
                         {confirmId === account.id && <div className="mt-2 flex flex-wrap items-center gap-2">
                             <span>{t(`${prefix}.confirm_remove`)}</span>
                             <button type="button" className="btn btn-error btn-xs" disabled={busy} onClick={() => void remove(account.id)}>{t(`${prefix}.remove`)}</button>

@@ -4,8 +4,10 @@
 
 ## 内置 App2API（默认）
 
-1. 安装 DeepGeminiProxy 即可，不必另装 App2API 或 Node.js，不必创建网关 API Key。打开 **添加新账号 → Gemini App → 使用 Google 登录**，在浏览器完成授权。Google 的服务条款如需接受，请在官方 Gemini App 操作。成功登录不代表模型权益已验证。
+1. 安装 DeepGeminiProxy 即可，不必另装 App2API 或 Node.js，不必创建网关 API Key。打开 **添加新账号 → Gemini App → 使用 Google 登录**，在浏览器完成授权。登录不会自动接受服务条款，也不代表模型权益已验证。
 2. 开启代理；客户端沿用 DeepGeminiProxy 的原地址与 API Key，选择 `gemini-app-neon`、`gemini-app-hydrogen` 或 `gemini-app-flash-lite`。支持 HTTP Chat Completions 和 Responses，其他能力与模型权益由 App2API 和 Google 决定。
+
+如模型返回 `502 NATIVE_PRECONDITION_REQUIRED`，打开 **账号管理 → Gemini App**，展开账号下的 **查看脱敏诊断**。错误码本身不代表条款问题；若 Google 明确提示需要接受条款，先在官网查阅条款，再在该账号下点 **确认接受 Gemini 条款 → 同意并提交给 Google**。只有 Google 确认后才显示已确认；无需删账号或重新登录（账号授权已失效的除外），也不会自动重试模型。若确认失败，可在诊断中区分条款版本查询、条款提交与最近一次模型请求的错误。
 
 应用按需启动随包附带的 App2API 引擎，并在退出时关闭。它只在随机本机回环端口监听，内部认证由应用生成，独立的 App2API 网页后台不对外开放。授权状态保存在 DeepGeminiProxy 数据目录下的 `gemini-app2api/`，与旧本地 OAuth 和外部网关的数据不合并；切换模式后如果看不到旧账号，需要重新登录，旧文件不会被删除。
 
