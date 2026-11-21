@@ -448,6 +448,18 @@
                 "needs_login": "Sign-in required",
                 "remove": "Remove",
                 "confirm_remove": "Remove this account from the Gemini App pool?",
+                "card": {
+                    "login": "Sign-in",
+                    "login_ok": "OK",
+                    "login_required": "Re-login",
+                    "terms": "Terms",
+                    "terms_unknown": "Unconfirmed",
+                    "terms_accepted": "Accepted",
+                    "terms_error": "Failed",
+                    "terms_pending": "Submitting",
+                    "last_error": "Last error",
+                    "details": "Redacted diagnostics"
+                },
                 "terms": {
                     "unknown": "Gemini terms: not confirmed",
                     "accepted": "Gemini terms: confirmed by Google. Test the model again.",

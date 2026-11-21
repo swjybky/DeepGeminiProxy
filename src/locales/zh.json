@@ -446,6 +446,18 @@
                 "needs_login": "需要重新登录",
                 "remove": "移除",
                 "confirm_remove": "从 Gemini App 池移除此账号？",
+                "card": {
+                    "login": "登录状态",
+                    "login_ok": "正常",
+                    "login_required": "需重新登录",
+                    "terms": "服务条款",
+                    "terms_unknown": "未确认",
+                    "terms_accepted": "已确认",
+                    "terms_error": "提交失败",
+                    "terms_pending": "提交中",
+                    "last_error": "最近错误",
+                    "details": "脱敏诊断"
+                },
                 "terms": {
                     "unknown": "Gemini 条款：未确认",
                     "accepted": "Gemini 条款：Google 已确认，请重新测试模型",

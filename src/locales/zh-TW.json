@@ -394,6 +394,18 @@
                 "needs_login": "需要重新登入",
                 "remove": "移除",
                 "confirm_remove": "從 Gemini App 池移除此帳號？",
+                "card": {
+                    "login": "登入狀態",
+                    "login_ok": "正常",
+                    "login_required": "需重新登入",
+                    "terms": "服務條款",
+                    "terms_unknown": "未確認",
+                    "terms_accepted": "已確認",
+                    "terms_error": "提交失敗",
+                    "terms_pending": "提交中",
+                    "last_error": "最近錯誤",
+                    "details": "去識別化診斷"
+                },
                 "errors": {
                     "oauth_profile_required": "請先設定已獲 Gemini App 權限的 Google OAuth 用戶端和授權範圍，再重新啟動 DeepGeminiProxy。",
                     "oauth_profile_invalid": "Gemini App OAuth 設定無效。",

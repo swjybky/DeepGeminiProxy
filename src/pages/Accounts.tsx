@@ -35,6 +35,7 @@ import { motion } from "framer-motion";
 import { useSearchParams } from "react-router-dom";
 import { useGeminiAppAccounts } from "../stores/useGeminiAppAccounts";
 import { GeminiAppAccountInfo } from "../components/accounts/GeminiAppAccountInfo";
+import { GeminiAppAccountCard } from "../components/accounts/GeminiAppAccountCard";
 
 type FilterType = "all" | "pro" | "ultra" | "enterprise" | "free" | "gemini-app";
 type ViewMode = "list" | "grid";
@@ -357,9 +358,6 @@ function Accounts() {
   useEffect(() => {
     setCurrentPage(page => Math.min(page, Math.max(1, Math.ceil(totalCount / ITEMS_PER_PAGE))));
   }, [totalCount, ITEMS_PER_PAGE]);
-  const appAccountContent = (account: typeof appAccounts[number]) => (
-    <GeminiAppAccountInfo account={account} onRemove={() => setAppDeleteId(account.id)} />
-  );
 
   const handleReorder = (orderedIds: string[]) => {
     const reorderedIds = new Set(orderedIds);
@@ -1253,7 +1251,7 @@ function Accounts() {
           <div className="h-full overflow-y-auto">
             <AccountGrid
               accounts={paginatedAccounts}
-              extraCards={paginatedApps.map(account => <article key={account.id} className="rounded-2xl border border-gray-100 dark:border-base-200 bg-white dark:bg-base-100 p-4 shadow-sm">{appAccountContent(account)}</article>)}
+              extraCards={paginatedApps.map(account => <GeminiAppAccountCard key={account.id} account={account} onRemove={() => setAppDeleteId(account.id)} />)}
               selectedIds={selectedIds}
               refreshingIds={refreshingIds}
               onToggleSelect={handleToggleSelect}
