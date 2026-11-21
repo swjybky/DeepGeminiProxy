@@ -3,6 +3,11 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.3 (2026-11-21)**:
+        -   Gemini App grid cards show sign-in status, terms status, and the most recent model error, with actions to confirm the terms and view redacted diagnostics.
+        -   Fixed the dashboard’s Gemini App account link opening the mini window instead of the main account page.
+        -   Client sync uses the gateway’s advertised model catalog, selects models compatible with each client’s protocol, and syncs context and output limits to OpenCode.
+
     *   **v1.0.2 (2026-11-20)**:
         -   Installers now bundle Gemini App2API and Node.js. The app starts the engine on demand; no separate install or gateway API key is required.
         -   Gemini App account cards let users explicitly accept service terms on an existing account when Google requires it. Signing in does not accept terms automatically.
