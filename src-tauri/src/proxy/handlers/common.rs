@@ -193,28 +193,41 @@ pub struct ModelListEntry {
 pub async fn collect_model_list_entries(
     state: &crate::proxy::server::AppState,
 ) -> Vec<ModelListEntry> {
+    let only_raw = *state.only_raw_quota_models.read().await;
+    let enabled_models = state.enabled_models.read().await;
+    collect_model_list_entries_from(
+        &state.custom_mapping,
+        Some(&state.token_manager),
+        only_raw,
+        enabled_models.as_deref(),
+    )
+    .await
+}
+
+pub async fn collect_model_list_entries_from(
+    custom_mapping: &tokio::sync::RwLock<std::collections::HashMap<String, String>>,
+    token_manager: Option<&crate::proxy::token_manager::TokenManager>,
+    only_raw: bool,
+    enabled_models: Option<&[String]>,
+) -> Vec<ModelListEntry> {
     use crate::proxy::common::model_mapping::{
         get_all_dynamic_models, get_all_dynamic_models_metadata,
     };
 
-    let only_raw = *state.only_raw_quota_models.read().await;
-    let mut model_ids =
-        get_all_dynamic_models(&state.custom_mapping, Some(&state.token_manager), only_raw).await;
+    let mut model_ids = get_all_dynamic_models(custom_mapping, token_manager, only_raw).await;
     model_ids.retain(|id| !crate::proxy::upstream::gemini_app::is_app_model_id(id));
     let groups = if only_raw {
         None
     } else {
-        let aliases = state.custom_mapping.read().await;
+        let aliases = custom_mapping.read().await;
         Some(crate::proxy::common::model_catalog::group_models(
             std::mem::take(&mut model_ids),
             &aliases,
         ))
     };
     {
-        let enabled_models = state.enabled_models.read().await;
-        let is_enabled = |id: &str| {
-            crate::proxy::common::model_gate::is_model_enabled(enabled_models.as_deref(), id)
-        };
+        let is_enabled =
+            |id: &str| crate::proxy::common::model_gate::is_model_enabled(enabled_models, id);
         if let Some(groups) = groups {
             model_ids = crate::proxy::common::model_catalog::discoverable_ids(groups, is_enabled);
         } else {
@@ -224,12 +237,8 @@ pub async fn collect_model_list_entries(
     if model_ids.is_empty() {
         return Vec::new();
     }
-    let metadata_map = get_all_dynamic_models_metadata(
-        &state.custom_mapping,
-        Some(&state.token_manager),
-        only_raw,
-    )
-    .await;
+    let metadata_map =
+        get_all_dynamic_models_metadata(custom_mapping, token_manager, only_raw).await;
 
     model_ids
         .into_iter()
@@ -260,6 +269,88 @@ pub async fn collect_model_list_entries(
             }
         })
         .collect()
+}
+
+/// 统一收集网关对外可发现的聚合模型列表（与 `/v1/models` 同源，含启用状态、自定义别名、Gemini App 模型及思考档位）。
+pub async fn collect_discoverable_models(
+    state: &crate::proxy::server::AppState,
+) -> Vec<crate::proxy::common::model_catalog::DiscoverableModel> {
+    let only_raw = *state.only_raw_quota_models.read().await;
+    let enabled_models = state.enabled_models.read().await;
+    let has_gemini_app = state
+        .gemini_app
+        .as_ref()
+        .is_some_and(|pool| pool.available());
+    collect_discoverable_models_from(
+        &state.custom_mapping,
+        Some(&state.token_manager),
+        only_raw,
+        enabled_models.as_deref(),
+        has_gemini_app,
+    )
+    .await
+}
+
+pub async fn collect_discoverable_models_from(
+    custom_mapping: &tokio::sync::RwLock<std::collections::HashMap<String, String>>,
+    token_manager: Option<&crate::proxy::token_manager::TokenManager>,
+    only_raw: bool,
+    enabled_models: Option<&[String]>,
+    has_gemini_app: bool,
+) -> Vec<crate::proxy::common::model_catalog::DiscoverableModel> {
+    use crate::proxy::{
+        common::{model_catalog::DiscoverableModel, model_gate::is_model_enabled},
+        model_specs::discoverable_efforts_for,
+        upstream::gemini_app,
+    };
+
+    let entries =
+        collect_model_list_entries_from(custom_mapping, token_manager, only_raw, enabled_models)
+            .await;
+    let aliases = custom_mapping.read().await;
+
+    let mut out: Vec<DiscoverableModel> = entries
+        .into_iter()
+        .map(|entry| {
+            let alias_target = aliases.get(&entry.id);
+            let reasoning_efforts = match alias_target {
+                Some(target) => discoverable_efforts_for(target, token_manager),
+                None => discoverable_efforts_for(&entry.id, token_manager),
+            };
+            let display_name = if alias_target.is_some() {
+                None
+            } else {
+                entry.display_name
+            };
+            DiscoverableModel {
+                id: entry.id,
+                display_name,
+                context_limit: entry.context_limit,
+                output_limit: entry.output_limit,
+                reasoning_efforts,
+            }
+        })
+        .collect();
+    drop(aliases);
+
+    if has_gemini_app {
+        for app_model in gemini_app::MODELS {
+            if is_model_enabled(enabled_models, app_model.public) {
+                let (fallback_ctx, fallback_out) =
+                    crate::proxy::handlers::openai::resolve_model_token_limits(app_model.public);
+                let context_limit = app_model.context.map(i64::from).unwrap_or(fallback_ctx);
+                out.push(DiscoverableModel {
+                    id: app_model.public.to_string(),
+                    display_name: None,
+                    context_limit,
+                    output_limit: fallback_out,
+                    reasoning_efforts: Vec::new(),
+                });
+            }
+        }
+    }
+
+    out
 }
 
 /// OpenAI / Anthropic 兼容的模型对象投影
@@ -1308,5 +1399,105 @@ mod retry_after_tests {
             .as_str()
             .unwrap()
             .contains("【模型全池临时熔断】"));
+    }
+
+    #[tokio::test]
+    async fn discoverable_models_match_v1_models_aggregation_filters_and_gemini_app() {
+        struct ResetAvailable;
+        impl Drop for ResetAvailable {
+            fn drop(&mut self) {
+                crate::proxy::cli_sync::update_available_model_ids(std::iter::empty::<String>());
+            }
+        }
+        let _guard = ResetAvailable;
+
+        let dir = tempfile::tempdir().unwrap();
+        let accounts_dir = dir.path().join("accounts");
+        std::fs::create_dir_all(&accounts_dir).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let account = serde_json::json!({
+            "id": "fixture",
+            "email": "fixture@example.test",
+            "token": {
+                "access_token": "test-only",
+                "refresh_token": "test-only",
+                "expires_in": 3600,
+                "expiry_timestamp": now + 3600
+            },
+            "quota": {"models": [
+                {"name": "gemini-4-neon-low", "percentage": 95, "display_name": "Gemini 4 Neon (Low)", "max_tokens": 1048576, "max_output_tokens": 65536},
+                {"name": "gemini-4-neon-high", "percentage": 95, "display_name": "Gemini 4 Neon (High)", "max_tokens": 1048576, "max_output_tokens": 65536},
+                {"name": "gemini-4-neon-xhigh", "percentage": 95, "display_name": "Gemini 4 Neon (XHigh)", "max_tokens": 1048576, "max_output_tokens": 65536},
+                {"name": "gemini-3.8-flash-low", "percentage": 95},
+                {"name": "gemini-3.8-flash-high", "percentage": 95},
+                {"name": "gpt-oss-120b-medium", "percentage": 95}
+            ]},
+            "created_at": now,
+            "last_used": now
+        });
+        std::fs::write(accounts_dir.join("fixture.json"), account.to_string()).unwrap();
+        let manager = crate::proxy::TokenManager::new(dir.path().into());
+        assert_eq!(manager.load_accounts().await.unwrap(), 1);
+
+        let mapping = tokio::sync::RwLock::new(std::collections::HashMap::from([(
+            "custom-neon".to_string(),
+            "gemini-4-neon".to_string(),
+        )]));
+
+        let all =
+            collect_discoverable_models_from(&mapping, Some(&manager), false, None, true).await;
+        let ids: Vec<&str> = all.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            ids,
+            vec![
+                "custom-neon",
+                "gemini-3.8-flash",
+                "gemini-4-neon",
+                "gpt-oss-120b",
+                "gemini-app-neon",
+                "gemini-app-hydrogen",
+                "gemini-app-flash-lite",
+            ]
+        );
+        let neon = all.iter().find(|m| m.id == "gemini-4-neon").unwrap();
+        assert_eq!(neon.display_name.as_deref(), Some("Gemini 4 Neon"));
+        assert_eq!(neon.reasoning_efforts, vec!["low", "high", "xhigh"]);
+
+        let custom = all.iter().find(|m| m.id == "custom-neon").unwrap();
+        assert_eq!(custom.display_name, None);
+        assert_eq!(custom.reasoning_efforts, vec!["low", "high", "xhigh"]);
+
+        let gpt = all.iter().find(|m| m.id == "gpt-oss-120b").unwrap();
+        assert!(gpt.reasoning_efforts.is_empty());
+
+        let app_neon = all.iter().find(|m| m.id == "gemini-app-neon").unwrap();
+        assert_eq!(app_neon.context_limit, 512_000);
+        assert!(app_neon.reasoning_efforts.is_empty());
+
+        // Respect enabled_models allowlist (legacy variant-only + single gemini-app model)
+        let allowlist = vec![
+            "gemini-3.8-flash-low".to_string(),
+            "gemini-app-neon".to_string(),
+        ];
+        let filtered = collect_discoverable_models_from(
+            &mapping,
+            Some(&manager),
+            false,
+            Some(&allowlist),
+            true,
+        )
+        .await;
+        let filtered_ids: Vec<&str> = filtered.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            filtered_ids,
+            vec!["gemini-3.8-flash-low", "gemini-app-neon"]
+        );
+        assert!(filtered[0].reasoning_efforts.is_empty());
+
+        // proxy_model_catalog keeps singleton members in only_raw mode so EnabledModelsPanel stays valid
+        let raw_catalog =
+            crate::proxy::server::proxy_model_catalog(&mapping, Some(&manager), true, true).await;
+        assert!(raw_catalog.iter().all(|g| g.members == vec![g.id.clone()]));
+        assert!(raw_catalog.iter().any(|g| g.id == "gemini-4-neon-xhigh"));
     }
 }

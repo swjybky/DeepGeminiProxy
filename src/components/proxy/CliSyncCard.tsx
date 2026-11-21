@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { Bot, Eye, Loader2, RefreshCw, Terminal, X } from 'lucide-react';
 import { Claude, DeepSeek, Gemini, Grok, HermesAgent, OpenAI, OpenClaw, OpenCode } from '@lobehub/icons';
 import deepWriteIcon from '../../assets/deepwrite-icon.png';
-import { useProxyModels } from '../../hooks/useProxyModels';
 import { cn } from '../../utils/cn';
 import ModalDialog from '../common/ModalDialog';
 import { showToast } from '../common/ToastContainer';
@@ -39,7 +38,6 @@ type StatusResult = { status: AgentStatus; error?: never } | { status?: never; e
 
 export function CliSyncCard({ proxyUrl, apiKey, className }: CliSyncCardProps) {
     const { t } = useTranslation();
-    const { models } = useProxyModels();
     const [statuses, setStatuses] = useState<Partial<Record<AgentApp, StatusResult>>>({});
     const [pending, setPending] = useState<Partial<Record<AgentApp, boolean>>>({});
     const [disconnectApp, setDisconnectApp] = useState<AgentApp | null>(null);
@@ -82,7 +80,7 @@ export function CliSyncCard({ proxyUrl, apiKey, className }: CliSyncCardProps) {
         setPending(previous => ({ ...previous, [app]: true }));
         try {
             if (enabled) {
-                await configureAgent(app, proxyUrl, apiKey, models, statuses[app]?.status);
+                await configureAgent(app, proxyUrl, apiKey, statuses[app]?.status);
             } else {
                 await disconnectAgent(app);
             }

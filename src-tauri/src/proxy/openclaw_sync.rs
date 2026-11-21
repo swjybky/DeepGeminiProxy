@@ -339,6 +339,11 @@ fn redact_json_value(val: &mut Value) {
 pub fn resolve_model_specs(model_id: &str) -> (u64, u64, bool, Vec<&'static str>) {
     let lower = model_id.to_lowercase();
 
+    if let Some(app_model) = crate::proxy::upstream::gemini_app::find_model(&lower) {
+        let context_window = app_model.context.unwrap_or(1_024_000) as u64;
+        return (context_window, 65_536, false, vec!["text"]);
+    }
+
     let is_gemini = lower.contains("gemini");
     let is_claude = lower.contains("claude");
     let is_reasoning = lower.contains("thinking")
@@ -346,6 +351,7 @@ pub fn resolve_model_specs(model_id: &str) -> (u64, u64, bool, Vec<&'static str>
         || lower.contains("claude-3-7")
         || lower.contains("gemini-2.5")
         || lower.contains("gemini-3")
+        || lower.contains("gemini-4")
         || lower.contains("o1")
         || lower.contains("o3")
         || lower.contains("r1");

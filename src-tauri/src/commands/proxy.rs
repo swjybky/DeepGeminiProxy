@@ -423,17 +423,64 @@ pub async fn get_proxy_model_catalog(
     }
 
     let config = crate::modules::config::load_app_config()?.proxy;
+    let token_manager = crate::modules::account::get_data_dir()
+        .ok()
+        .map(TokenManager::new);
+    if let Some(ref tm) = token_manager {
+        let _ = tm.load_accounts().await;
+    }
     let mapping = tokio::sync::RwLock::new(config.custom_mapping);
-    let ids = crate::proxy::common::model_mapping::get_all_dynamic_models(
+    let has_gemini_app =
+        crate::proxy::upstream::gemini_app::GeminiApp::shared().is_ok_and(|p| p.available());
+    Ok(crate::proxy::server::proxy_model_catalog(
         &mapping,
-        None,
+        token_manager.as_ref(),
         config.only_raw_quota_models,
+        has_gemini_app,
     )
-    .await;
-    let aliases = mapping.read().await;
-    Ok(crate::proxy::common::model_catalog::group_models(
-        ids, &aliases,
-    ))
+    .await)
+}
+
+pub async fn resolve_proxy_discoverable_models(
+    state: &ProxyServiceState,
+) -> Result<Vec<crate::proxy::common::model_catalog::DiscoverableModel>, String> {
+    let server = state
+        .admin_server
+        .read()
+        .await
+        .as_ref()
+        .map(|admin| admin.axum_server.clone());
+    if let Some(server) = server {
+        return Ok(server.discoverable_models().await);
+    }
+
+    let config = crate::modules::config::load_app_config()?.proxy;
+    let token_manager = crate::modules::account::get_data_dir()
+        .ok()
+        .map(TokenManager::new);
+    if let Some(ref tm) = token_manager {
+        let _ = tm.load_accounts().await;
+    }
+    let mapping = tokio::sync::RwLock::new(config.custom_mapping);
+    let has_gemini_app =
+        crate::proxy::upstream::gemini_app::GeminiApp::shared().is_ok_and(|p| p.available());
+    Ok(
+        crate::proxy::handlers::common::collect_discoverable_models_from(
+            &mapping,
+            token_manager.as_ref(),
+            config.only_raw_quota_models,
+            config.enabled_models.as_deref(),
+            has_gemini_app,
+        )
+        .await,
+    )
+}
+
+#[tauri::command]
+pub async fn get_proxy_discoverable_models(
+    state: State<'_, ProxyServiceState>,
+) -> Result<Vec<crate::proxy::common::model_catalog::DiscoverableModel>, String> {
+    resolve_proxy_discoverable_models(&state).await
 }
 
 /// 获取反代服务统计

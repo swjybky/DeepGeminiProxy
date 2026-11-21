@@ -1154,6 +1154,21 @@ fn build_model_json(model_def: &ModelDef) -> Value {
 pub struct ModelInput {
     pub id: String,
     pub name: Option<String>,
+    #[serde(default, alias = "context_limit")]
+    pub context_limit: Option<u64>,
+    #[serde(default, alias = "output_limit")]
+    pub output_limit: Option<u64>,
+}
+
+impl From<crate::proxy::common::model_catalog::DiscoverableModel> for ModelInput {
+    fn from(model: crate::proxy::common::model_catalog::DiscoverableModel) -> Self {
+        Self {
+            id: model.id,
+            name: model.display_name,
+            context_limit: u64::try_from(model.context_limit).ok().filter(|&v| v > 0),
+            output_limit: u64::try_from(model.output_limit).ok().filter(|&v| v > 0),
+        }
+    }
 }
 
 /// Sensible per-series defaults derived from the model id prefix. Real model metadata
@@ -1163,6 +1178,13 @@ pub struct ModelInput {
 /// families, in which case only the name is written.
 fn series_defaults_for(model_id: &str) -> Option<Value> {
     let id = model_id.to_lowercase();
+    if let Some(app_model) = crate::proxy::upstream::gemini_app::find_model(&id) {
+        let context = app_model.context.unwrap_or(1_048_576);
+        return Some(serde_json::json!({
+            "limit": { "context": context, "output": 65_536 },
+            "modalities": { "input": ["text"], "output": ["text"] },
+        }));
+    }
     // Gemini 4 / 3.x family: 1M context, 64k output, multimodal in, text out.
     if id.starts_with("gemini-4")
         || id.starts_with("gemini-3")
@@ -1206,6 +1228,15 @@ fn series_defaults_for(model_id: &str) -> Option<Value> {
 /// it verbatim (so the config matches what the user saw); otherwise we derive one.
 /// When we can infer the model family from the id we also fill in limit/modalities.
 fn build_fallback_model_json(model_id: &str, display_name: Option<&str>) -> Value {
+    build_fallback_model_json_with_limits(model_id, display_name, None, None)
+}
+
+fn build_fallback_model_json_with_limits(
+    model_id: &str,
+    display_name: Option<&str>,
+    context_limit: Option<u64>,
+    output_limit: Option<u64>,
+) -> Value {
     // Prefer the caller-provided display name; fall back to a cleaned-up id.
     let name = display_name
         .filter(|n| !n.trim().is_empty())
@@ -1220,6 +1251,15 @@ fn build_fallback_model_json(model_id: &str, display_name: Option<&str>) -> Valu
                 entry.insert(k.clone(), v.clone());
             }
         }
+    }
+    if let (Some(ctx), Some(out)) = (
+        context_limit.filter(|&v| v > 0),
+        output_limit.filter(|&v| v > 0),
+    ) {
+        entry.insert(
+            "limit".to_string(),
+            serde_json::json!({ "context": ctx, "output": out }),
+        );
     }
     Value::Object(entry)
 }
@@ -1363,23 +1403,15 @@ fn merge_catalog_models(provider: &mut Value, model_inputs: Option<&[ModelInput]
         provider["models"] = serde_json::json!({});
     }
 
-    // [2026-10-29] 一键配置只写当前账号池真实可用的模型，字典里的未开通模型一律不出现
-    let catalog: Vec<ModelDef> = build_model_catalog()
-        .into_iter()
-        .filter(|m| crate::proxy::cli_sync::is_model_available_now(m.id))
-        .collect();
-    let catalog_map: HashMap<&str, &ModelDef> = catalog.iter().map(|m| (m.id, m)).collect();
+    let full_catalog = build_model_catalog();
+    let catalog_map: HashMap<&str, &ModelDef> = full_catalog.iter().map(|m| (m.id, m)).collect();
 
     if let Some(models) = provider.get_mut("models").and_then(|m| m.as_object_mut()) {
-        // When no specific models are requested, sync the whole catalog.
-        let catalog_ids: Vec<&str> = catalog_map.keys().copied().collect();
-
+        // Explicitly passed discoverable models (including gemini-app-*, custom aliases, and
+        // dynamic pool models) are already gated by the unified gateway discovery source.
         let normalized_inputs = normalize_model_inputs(model_inputs.unwrap_or(&[]));
         for input in &normalized_inputs {
             let model_id = input.id.as_str();
-            if !crate::proxy::cli_sync::is_model_available_now(model_id) {
-                continue;
-            }
             if let Some(model_def) = catalog_map.get(model_id) {
                 let catalog_model = build_model_json(model_def);
 
@@ -1406,27 +1438,30 @@ fn merge_catalog_models(provider: &mut Value, model_inputs: Option<&[ModelInput]
                 }
             } else {
                 // Fallback: the id isn't in our catalog (e.g. a dynamically discovered
-                // model from the user's account quota, or a new model not yet listed).
-                // Previously these were silently dropped, which caused selected models to
-                // never appear in the config. OpenCode only requires a `name`, so write a
-                // minimal entry using the frontend-provided display name when available.
+                // model from the user's account quota, gemini-app-*, or a custom alias).
                 // Preserve any user-defined object the user may already have.
                 if !models.contains_key(model_id) {
                     models.insert(
                         model_id.to_string(),
-                        build_fallback_model_json(model_id, input.name.as_deref()),
+                        build_fallback_model_json_with_limits(
+                            model_id,
+                            input.name.as_deref(),
+                            input.context_limit,
+                            input.output_limit,
+                        ),
                     );
                 }
             }
         }
 
-        // No inputs at all => sync the entire catalog (None means "all").
+        // No inputs at all => sync the available catalog (None means "all available").
         if model_inputs.is_none() {
-            for model_id in &catalog_ids {
-                if let Some(model_def) = catalog_map.get(model_id) {
-                    if !models.contains_key(*model_id) {
-                        models.insert((*model_id).to_string(), build_model_json(model_def));
-                    }
+            for model_def in full_catalog
+                .iter()
+                .filter(|m| crate::proxy::cli_sync::is_model_available_now(m.id))
+            {
+                if !models.contains_key(model_def.id) {
+                    models.insert(model_def.id.to_string(), build_model_json(model_def));
                 }
             }
         }
@@ -1768,6 +1803,8 @@ mod tests {
         ModelInput {
             id: id.to_string(),
             name: None,
+            context_limit: None,
+            output_limit: None,
         }
     }
 
@@ -1776,6 +1813,8 @@ mod tests {
         ModelInput {
             id: id.to_string(),
             name: Some(name.to_string()),
+            context_limit: None,
+            output_limit: None,
         }
     }
 
@@ -2956,6 +2995,63 @@ mod tests {
             "Custom Unknown Agent"
         );
     }
+
+    #[test]
+    fn explicit_model_inputs_preserve_gemini_app_and_custom_aliases_with_active_pool() {
+        struct ResetAvailable;
+        impl Drop for ResetAvailable {
+            fn drop(&mut self) {
+                crate::proxy::cli_sync::update_available_model_ids(std::iter::empty::<String>());
+            }
+        }
+        let _guard = ResetAvailable;
+        crate::proxy::cli_sync::update_available_model_ids(
+            [
+                "claude-sonnet-4-6",
+                "gemini-3.1-pro",
+                "gemini-3.1-flash-lite",
+            ]
+            .map(str::to_owned),
+        );
+
+        let inputs = [
+            ModelInput {
+                id: "gemini-app-neon".to_string(),
+                name: None,
+                context_limit: Some(512_000),
+                output_limit: Some(65_536),
+            },
+            ModelInput {
+                id: "my-custom-alias".to_string(),
+                name: None,
+                context_limit: Some(200_000),
+                output_limit: Some(64_000),
+            },
+            ModelInput {
+                id: "gemini-4-neon".to_string(),
+                name: Some("Gemini 4 Neon".to_string()),
+                context_limit: Some(1_048_576),
+                output_limit: Some(65_536),
+            },
+        ];
+
+        let updated = apply_sync_to_config(
+            serde_json::json!({}),
+            "http://127.0.0.1:8045",
+            "sk-fixture",
+            Some(&inputs),
+        );
+        let models = updated["provider"][ANTIGRAVITY_PROVIDER_ID]["models"]
+            .as_object()
+            .unwrap();
+        assert_eq!(models["gemini-app-neon"]["limit"]["context"], 512_000);
+        assert_eq!(
+            models["gemini-app-neon"]["modalities"]["input"],
+            serde_json::json!(["text"])
+        );
+        assert_eq!(models["my-custom-alias"]["limit"]["context"], 200_000);
+        assert_eq!(models["gemini-4-neon"]["name"], "Gemini 4 Neon");
+    }
 }
 
 pub fn read_opencode_config_content(file_name: Option<String>) -> Result<String, String> {
@@ -3049,8 +3145,7 @@ pub fn get_canonical_families() -> Vec<CanonicalFamilyDto> {
         .collect()
 }
 
-#[tauri::command]
-pub async fn execute_opencode_sync(
+pub async fn execute_opencode_sync_with_models(
     proxy_url: String,
     api_key: String,
     sync_accounts: Option<bool>,
@@ -3061,6 +3156,25 @@ pub async fn execute_opencode_sync(
     })
     .await
     .unwrap_or_else(|_| Err("Failed to execute sync".to_string()))
+}
+
+#[tauri::command]
+pub async fn execute_opencode_sync(
+    state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+    proxy_url: String,
+    api_key: String,
+    sync_accounts: Option<bool>,
+    models: Option<Vec<ModelInput>>,
+) -> Result<(), String> {
+    let resolved_models = match models {
+        Some(list) => Some(list),
+        None => crate::commands::proxy::resolve_proxy_discoverable_models(&state)
+            .await
+            .ok()
+            .filter(|list| !list.is_empty())
+            .map(|list| list.into_iter().map(ModelInput::from).collect()),
+    };
+    execute_opencode_sync_with_models(proxy_url, api_key, sync_accounts, resolved_models).await
 }
 
 #[tauri::command]

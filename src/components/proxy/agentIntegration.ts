@@ -21,9 +21,12 @@ export interface AgentStatus {
     files: string[];
 }
 
-interface AgentModel {
+export interface DiscoverableModel {
     id: string;
-    name: string;
+    display_name?: string | null;
+    context_limit: number;
+    output_limit: number;
+    reasoning_efforts?: string[];
 }
 
 const providerCommands = {
@@ -35,10 +38,10 @@ const providerCommands = {
 
 const defaultModels = {
     Claude: 'claude-sonnet-4-6',
-    Codex: 'gpt-oss-120b-medium',
-    Gemini: 'gemini-3.1-pro-high',
-    GrokBuild: 'gemini-3.8-flash-high',
-    DeepSeekHarness: 'gemini-3.8-flash-high',
+    Codex: 'gpt-oss-120b',
+    Gemini: 'gemini-3.1-pro',
+    GrokBuild: 'gemini-3.8-flash',
+    DeepSeekHarness: 'gemini-3.8-flash',
 } as const;
 
 function endpoint(app: AgentApp, proxyUrl: string) {
@@ -92,25 +95,67 @@ export function getConfigContent(app: AgentApp, fileName?: string): Promise<stri
     return request('get_cli_config_content', { appType: app, fileName });
 }
 
+function isImageModel(id: string) {
+    const lower = id.toLowerCase();
+    return lower.includes('image') || lower.startsWith('imagen');
+}
+
+function isGeminiAppModel(id: string) {
+    return id.toLowerCase().startsWith('gemini-app-');
+}
+
+function selectDefaultModel(app: keyof typeof defaultModels, modelIds: string[]) {
+    const preferred = defaultModels[app];
+    const supportsGeminiApp = app !== 'Claude' && app !== 'Gemini';
+    const chatModels = modelIds.filter(
+        id => !isImageModel(id) && (supportsGeminiApp || !isGeminiAppModel(id)),
+    );
+    if (chatModels.includes(preferred)) return preferred;
+    const preferredVariant = chatModels.find(id => id.startsWith(`${preferred}-`));
+    if (preferredVariant) return preferredVariant;
+    const preferredFamily = `${preferred.split('-')[0]}-`;
+    return (
+        chatModels.find(id => !isGeminiAppModel(id) && id.startsWith(preferredFamily))
+        ?? chatModels.find(id => id.startsWith(preferredFamily))
+        ?? chatModels[0]
+        ?? preferred
+    );
+}
+
+export async function getDiscoverableModels(): Promise<DiscoverableModel[]> {
+    const models = await request<DiscoverableModel[]>('get_proxy_discoverable_models');
+    return Array.isArray(models) ? models : [];
+}
+
 export async function configureAgent(
     app: AgentApp,
     proxyUrl: string,
     apiKey: string,
-    models: AgentModel[],
     status?: AgentStatus,
+    providedModels?: DiscoverableModel[],
 ) {
     if (app === 'DeepWrite') return request('execute_deepwrite_sync');
-    const modelIds = models.map(model => model.id);
     const url = endpoint(app, proxyUrl);
-    if (app === 'OpenCode') {
-        return request('execute_opencode_sync', {
-            proxyUrl: url, apiKey, syncAccounts: false,
-            models: models.length ? models.map(({ id, name }) => ({ id, name })) : undefined,
-        });
-    }
     if (app === 'Hermes') {
         return request('execute_hermes_sync', {
             proxyUrl: url, apiKey, discoverModels: true, models: [], activate: false,
+        });
+    }
+
+    const models = providedModels ?? await getDiscoverableModels();
+    const modelIds = models.map(model => model.id);
+    if (app === 'OpenCode') {
+        if (!models.length) throw new Error('No available gateway models');
+        return request('execute_opencode_sync', {
+            proxyUrl: url,
+            apiKey,
+            syncAccounts: false,
+            models: models.map(({ id, display_name, context_limit, output_limit }) => ({
+                id,
+                name: display_name?.trim() || undefined,
+                contextLimit: context_limit,
+                outputLimit: output_limit,
+            })),
         });
     }
 
@@ -125,9 +170,11 @@ export async function configureAgent(
 
         return request('execute_droid_sync', {
             managedOnly: true,
-            customModels: models.map(({ id, name }) => {
+            customModels: models.map(({ id, display_name }) => {
                 const anthropic = id.startsWith('claude-');
-                const displayName = `AG-${name}`;
+                const geminiApp = isGeminiAppModel(id);
+                const label = display_name?.trim() || id;
+                const displayName = `AG-${label}`;
                 return {
                     id: `custom:AG-${id}`,
                     model: id,
@@ -135,7 +182,7 @@ export async function configureAgent(
                     baseUrl: anthropic ? url : `${url}/v1`,
                     apiKey,
                     provider: anthropic ? 'anthropic' : 'generic-chat-completion-api',
-                    noImageSupport: !(anthropic || /^(gemini-|gpt-4)|image/.test(id)),
+                    noImageSupport: geminiApp || !(anthropic || /^(gemini-|gpt-4)|image/.test(id)),
                     ...(anthropic ? { maxOutputTokens: 64000 } : {}),
                     ...(anthropic && id.includes('thinking')
                         ? { extraArgs: { thinking: { type: 'enabled', budget_tokens: 32000 } } }
@@ -145,12 +192,18 @@ export async function configureAgent(
         });
     }
 
-    const preferred = defaultModels[app];
-    const chatModels = modelIds.filter(id => !id.includes('image'));
-    const preferredFamily = preferred.split('-')[0] + '-';
-    const model = chatModels.includes(preferred) ? preferred
-        : chatModels.find(id => id.startsWith(preferredFamily)) ?? chatModels[0] ?? preferred;
-    return request('execute_cli_sync', { appType: app, proxyUrl: url, apiKey, model, integration: true });
+    if ((app === 'DeepSeekHarness' || app === 'GrokBuild') && !models.length) {
+        throw new Error('No available gateway models');
+    }
+    const model = selectDefaultModel(app, modelIds);
+    return request('execute_cli_sync', {
+        appType: app,
+        proxyUrl: url,
+        apiKey,
+        model,
+        models,
+        integration: true,
+    });
 }
 
 export function disconnectAgent(app: AgentApp) {

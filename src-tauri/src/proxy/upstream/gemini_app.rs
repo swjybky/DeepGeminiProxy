@@ -57,7 +57,7 @@ pub(crate) struct AppModel {
     gateway_id: &'static str,
     mode: u64,
     attribution: Option<&'static str>,
-    context: Option<u32>,
+    pub(crate) context: Option<u32>,
 }
 impl AppModel {
     pub(crate) fn metadata(&self) -> Value {

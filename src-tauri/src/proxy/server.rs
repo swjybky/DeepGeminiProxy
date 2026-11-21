@@ -465,8 +465,23 @@ impl AxumServer {
         let only_raw = *self.only_raw_quota_models.read().await;
         proxy_model_catalog(
             &self.custom_mapping,
-            &self.token_manager,
+            Some(&self.token_manager),
             only_raw,
+            self.has_gemini_app(),
+        )
+        .await
+    }
+
+    pub async fn discoverable_models(
+        &self,
+    ) -> Vec<crate::proxy::common::model_catalog::DiscoverableModel> {
+        let only_raw = *self.only_raw_quota_models.read().await;
+        let enabled_models = self.enabled_models.read().await;
+        crate::proxy::handlers::common::collect_discoverable_models_from(
+            &self.custom_mapping,
+            Some(&self.token_manager),
+            only_raw,
+            enabled_models.as_deref(),
             self.has_gemini_app(),
         )
         .await
@@ -893,6 +908,10 @@ impl AxumServer {
             .route("/proxy/droid/config", post(admin_get_droid_config_content))
             .route("/proxy/status", get(admin_get_proxy_status))
             .route("/proxy/model-catalog", get(admin_get_proxy_model_catalog))
+            .route(
+                "/proxy/discoverable-models",
+                get(admin_get_proxy_discoverable_models),
+            )
             .route("/proxy/pool/config", get(admin_get_proxy_pool_config))
             .route("/proxy/pool/bindings", get(admin_get_all_account_bindings))
             .route("/proxy/pool/bind", post(admin_bind_account_proxy))
@@ -2269,16 +2288,17 @@ async fn admin_get_proxy_status(
     })))
 }
 
-async fn proxy_model_catalog(
+pub(crate) async fn proxy_model_catalog(
     custom_mapping: &RwLock<std::collections::HashMap<String, String>>,
-    token_manager: &TokenManager,
+    token_manager: Option<&TokenManager>,
     only_raw: bool,
     has_gemini_app: bool,
 ) -> Vec<crate::proxy::common::model_catalog::ModelGroup> {
+    use crate::proxy::common::model_catalog::{group_models, ModelGroup};
     use crate::proxy::upstream::gemini_app;
     let mut models = crate::proxy::common::model_mapping::get_all_dynamic_models(
         custom_mapping,
-        Some(token_manager),
+        token_manager,
         only_raw,
     )
     .await;
@@ -2290,8 +2310,19 @@ async fn proxy_model_catalog(
                 .map(|model| model.public.to_owned()),
         );
     }
-    let aliases = custom_mapping.read().await;
-    crate::proxy::common::model_catalog::group_models(models, &aliases)
+    if only_raw {
+        let unique: std::collections::BTreeSet<String> = models.into_iter().collect();
+        unique
+            .into_iter()
+            .map(|id| ModelGroup {
+                members: vec![id.clone()],
+                id,
+            })
+            .collect()
+    } else {
+        let aliases = custom_mapping.read().await;
+        group_models(models, &aliases)
+    }
 }
 
 async fn admin_get_proxy_model_catalog(
@@ -2301,7 +2332,7 @@ async fn admin_get_proxy_model_catalog(
     Json(
         proxy_model_catalog(
             &state.custom_mapping,
-            &state.token_manager,
+            Some(&state.token_manager),
             only_raw,
             state
                 .gemini_app
@@ -2310,6 +2341,12 @@ async fn admin_get_proxy_model_catalog(
         )
         .await,
     )
+}
+
+async fn admin_get_proxy_discoverable_models(
+    State(state): State<AppState>,
+) -> Json<Vec<crate::proxy::common::model_catalog::DiscoverableModel>> {
+    Json(crate::proxy::handlers::common::collect_discoverable_models(&state).await)
 }
 
 async fn admin_start_proxy_service(State(state): State<AppState>) -> impl IntoResponse {
@@ -4038,17 +4075,33 @@ struct CliSyncRequest {
     api_key: String,
     pub model: Option<String>,
     integration: Option<bool>,
+    #[serde(default)]
+    models: Option<Vec<crate::proxy::common::model_catalog::DiscoverableModel>>,
 }
 
 async fn admin_execute_cli_sync(
+    State(state): State<AppState>,
     Json(payload): Json<CliSyncRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::cli_sync::execute_cli_sync(
+    let models = match payload.models {
+        Some(models) => Some(models),
+        None if matches!(
+            payload.app_type,
+            crate::proxy::cli_sync::CliApp::DeepSeekHarness
+                | crate::proxy::cli_sync::CliApp::GrokBuild
+        ) =>
+        {
+            Some(crate::proxy::handlers::common::collect_discoverable_models(&state).await)
+        }
+        None => None,
+    };
+    crate::proxy::cli_sync::execute_cli_sync_with_models(
         payload.app_type,
         payload.proxy_url,
         payload.api_key,
         payload.model,
         payload.integration,
+        models,
     )
     .await
     .map(|_| StatusCode::OK)
@@ -4755,13 +4808,27 @@ struct OpencodeSyncRequest {
 }
 
 async fn admin_execute_opencode_sync(
+    State(state): State<AppState>,
     Json(payload): Json<OpencodeSyncRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
-    crate::proxy::opencode_sync::execute_opencode_sync(
+    let models = match payload.models {
+        Some(models) => Some(models),
+        None => {
+            let discoverable =
+                crate::proxy::handlers::common::collect_discoverable_models(&state).await;
+            (!discoverable.is_empty()).then(|| {
+                discoverable
+                    .into_iter()
+                    .map(crate::proxy::opencode_sync::ModelInput::from)
+                    .collect()
+            })
+        }
+    };
+    crate::proxy::opencode_sync::execute_opencode_sync_with_models(
         payload.proxy_url,
         payload.api_key,
         Some(payload.sync_accounts),
-        payload.models,
+        models,
     )
     .await
     .map(|_| StatusCode::OK)

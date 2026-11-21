@@ -26,6 +26,24 @@ pub struct ModelGroup {
     pub members: Vec<String>,
 }
 
+/// Canonical discoverable model entry shared by `/v1/models` and one-click agent integrations.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct DiscoverableModel {
+    pub id: String,
+    #[serde(
+        default,
+        alias = "displayName",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub display_name: Option<String>,
+    #[serde(alias = "contextLimit")]
+    pub context_limit: i64,
+    #[serde(alias = "outputLimit")]
+    pub output_limit: i64,
+    #[serde(default, alias = "reasoningEfforts")]
+    pub reasoning_efforts: Vec<String>,
+}
+
 /// A list may already contain account models before the runtime official catalog is synced.
 /// Group a known effort suffix only when its base is also exposed, never across custom aliases.
 pub fn group_models(ids: Vec<String>, aliases: &HashMap<String, String>) -> Vec<ModelGroup> {

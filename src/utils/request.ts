@@ -37,6 +37,7 @@ const COMMAND_MAPPING: Record<string, { url: string; method: 'GET' | 'POST' | 'D
   // Proxy Control & Status
   'get_proxy_status': { url: '/api/proxy/status', method: 'GET' },
   'get_proxy_model_catalog': { url: '/api/proxy/model-catalog', method: 'GET' },
+  'get_proxy_discoverable_models': { url: '/api/proxy/discoverable-models', method: 'GET' },
   'start_proxy_service': { url: '/api/proxy/start', method: 'POST' },
   'stop_proxy_service': { url: '/api/proxy/stop', method: 'POST' },
   'update_model_mapping': { url: '/api/proxy/mapping', method: 'POST' },

@@ -937,7 +937,7 @@ fn sync_agy_binary_wrapper_inner(
 
     let target_model = match model {
         Some(m) if !m.is_empty() => m,
-        _ => "gemini-3.8-flash-high",
+        _ => "gemini-3.8-flash",
     };
 
     if integration && !can_wrap_agy(&agy_path, &agy_cli_path) {
@@ -1097,7 +1097,15 @@ pub fn sync_config(
     api_key: &str,
     model: Option<&str>,
 ) -> Result<(), String> {
-    sync_config_files(app, proxy_url, api_key, model, &app.config_files(), false)
+    sync_config_files(
+        app,
+        proxy_url,
+        api_key,
+        model,
+        None,
+        &app.config_files(),
+        false,
+    )
 }
 
 fn sync_config_files(
@@ -1105,6 +1113,7 @@ fn sync_config_files(
     proxy_url: &str,
     api_key: &str,
     model: Option<&str>,
+    models: Option<&[crate::proxy::common::model_catalog::DiscoverableModel]>,
     files: &[CliConfigFile],
     integration: bool,
 ) -> Result<(), String> {
@@ -1312,7 +1321,7 @@ fn sync_config_files(
                 } else if file.name == "agy.sh" {
                     let target_model = match model {
                         Some(m) if !m.is_empty() => m,
-                        _ => "gemini-3.8-flash-high",
+                        _ => "gemini-3.8-flash",
                     };
                     content = format!(
                         "#!/bin/zsh\n\
@@ -1332,7 +1341,7 @@ fn sync_config_files(
                 } else if file.name == "agy.cmd" {
                     let target_model = match model {
                         Some(m) if !m.is_empty() => m,
-                        _ => "gemini-3.8-flash-high",
+                        _ => "gemini-3.8-flash",
                     };
                     content = format!(
                         "@echo off\r\n\
@@ -1422,68 +1431,38 @@ fn sync_config_files(
             }
             CliApp::GrokBuild => {
                 if file.name == "config.toml" {
-                    use toml_edit::{value, DocumentMut, Item, Table};
-                    let mut doc = content
-                        .parse::<DocumentMut>()
-                        .unwrap_or_else(|_| DocumentMut::new());
-
-                    let normalized_proxy_url = {
-                        let trimmed = proxy_url.trim().trim_end_matches('/');
-                        if trimmed.ends_with("/v1") {
-                            trimmed.to_string()
-                        } else {
-                            format!("{}/v1", trimmed)
+                    let fallback;
+                    let resolved_models = match models {
+                        Some(list) if !list.is_empty() => list,
+                        Some(_) if integration => {
+                            return Err("No available gateway models".to_string());
+                        }
+                        _ => {
+                            fallback = fallback_discoverable_models();
+                            fallback.as_slice()
                         }
                     };
-
-                    let default_model_id = match model {
-                        Some(m) if !m.is_empty() => m,
-                        _ => "gemini-3.8-flash-high",
-                    };
-                    let mut gateway_models: Vec<_> = get_core_gateway_models()
-                        .into_iter()
-                        .map(|model| (model.id, model.context_window))
-                        .collect();
-                    if integration && !gateway_models.iter().any(|(id, _)| *id == default_model_id)
-                    {
-                        let (window, _, _, _) =
-                            super::openclaw_sync::resolve_model_specs(default_model_id);
-                        gateway_models.push((default_model_id, window as i64));
-                    }
-
-                    // 1. 设置 [models] default 为真实选定的网关模型
-                    let models_sec = doc.entry("models").or_insert(Item::Table(Table::new()));
-                    if let Some(m_table) = models_sec.as_table_mut() {
-                        m_table.insert("default", value(default_model_id));
-                    }
-
-                    // 2. 注入所有网关真实模型到 [model."<id>"]
-                    let model_sec = doc.entry("model").or_insert(Item::Table(Table::new()));
-                    if let Some(m_table) = model_sec.as_table_mut() {
-                        for (id, context_window) in gateway_models {
-                            let entry = m_table.entry(id).or_insert(Item::Table(Table::new()));
-                            if let Some(t) = entry.as_table_mut() {
-                                t.insert("model", value(id));
-                                t.insert("base_url", value(&normalized_proxy_url));
-                                t.insert("name", value(id));
-                                t.insert("api_backend", value("responses"));
-                                t.insert("context_window", value(context_window));
-                                t.insert("image_input", value(true));
-                                if !api_key.is_empty() {
-                                    t.insert("api_key", value(api_key));
-                                }
-                            }
-                        }
-                    }
-
-                    content = doc.to_string();
+                    content = sync_grokbuild_toml_content(
+                        &content,
+                        proxy_url,
+                        api_key,
+                        model,
+                        resolved_models,
+                    )?;
                 }
             }
             CliApp::DeepSeekHarness => {
                 if file.name.ends_with("cordis.patch.yml") {
-                    let target_model = match model {
-                        Some(m) if !m.is_empty() => m,
-                        _ => "gemini-3.8-flash-high",
+                    let fallback;
+                    let resolved_models = match models {
+                        Some(list) if !list.is_empty() => list,
+                        Some(_) if integration => {
+                            return Err("No available gateway models".to_string());
+                        }
+                        _ => {
+                            fallback = fallback_discoverable_models();
+                            fallback.as_slice()
+                        }
                     };
                     let normalized_proxy_url = {
                         let trimmed = proxy_url.trim().trim_end_matches('/');
@@ -1493,10 +1472,11 @@ fn sync_config_files(
                             format!("{}/v1", trimmed)
                         }
                     };
-                    content = sync_dsh_cordis_patch_content(
+                    content = sync_dsh_cordis_patch_content_with_models(
                         &content,
                         &normalized_proxy_url,
-                        target_model,
+                        model,
+                        resolved_models,
                     )?;
                 } else if file.name == ".credentials.yaml" {
                     content = sync_dsh_credentials_content(&content, api_key)?;
@@ -1718,9 +1698,15 @@ fn enable_cli_integration(
     proxy_url: &str,
     api_key: &str,
     model: Option<&str>,
+    models: Option<&[crate::proxy::common::model_catalog::DiscoverableModel]>,
 ) -> Result<(), String> {
     if proxy_url.trim().is_empty() || api_key.trim().is_empty() {
         return Err("A gateway URL and API key are required".to_string());
+    }
+    if matches!(app, CliApp::DeepSeekHarness | CliApp::GrokBuild)
+        && models.is_some_and(|list| list.is_empty())
+    {
+        return Err("No available gateway models".to_string());
     }
 
     let mut files = app.config_files();
@@ -1757,13 +1743,14 @@ fn enable_cli_integration(
         }
     }
 
-    let result = sync_config_files(app, proxy_url, api_key, model, &files, true).and_then(|_| {
-        if get_sync_status(app, proxy_url).0 {
-            Ok(())
-        } else {
-            Err("The Agent configuration could not be verified after writing".to_string())
-        }
-    });
+    let result =
+        sync_config_files(app, proxy_url, api_key, model, models, &files, true).and_then(|_| {
+            if get_sync_status(app, proxy_url).0 {
+                Ok(())
+            } else {
+                Err("The Agent configuration could not be verified after writing".to_string())
+            }
+        });
     if let Err(error) = result {
         let mut errors = vec![error];
         for (path, _) in backups {
@@ -1844,26 +1831,70 @@ pub async fn get_cli_sync_status(app_type: CliApp, proxy_url: String) -> Result<
     .unwrap_or_else(|_| Err("Task panicked".to_string()))
 }
 
-#[tauri::command]
-pub async fn execute_cli_sync(
+pub async fn execute_cli_sync_with_models(
     app_type: CliApp,
     proxy_url: String,
     api_key: String,
     model: Option<String>,
     integration: Option<bool>,
+    models: Option<Vec<crate::proxy::common::model_catalog::DiscoverableModel>>,
 ) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let _lock = CLI_INTEGRATION_LOCK
             .lock()
             .unwrap_or_else(|error| error.into_inner());
         if integration.unwrap_or(false) {
-            enable_cli_integration(&app_type, &proxy_url, &api_key, model.as_deref())
+            enable_cli_integration(
+                &app_type,
+                &proxy_url,
+                &api_key,
+                model.as_deref(),
+                models.as_deref(),
+            )
         } else {
-            sync_config(&app_type, &proxy_url, &api_key, model.as_deref())
+            sync_config_files(
+                &app_type,
+                &proxy_url,
+                &api_key,
+                model.as_deref(),
+                models.as_deref(),
+                &app_type.config_files(),
+                false,
+            )
         }
     })
     .await
     .unwrap_or_else(|_| Err("Task panicked".to_string()))
+}
+
+#[tauri::command]
+pub async fn execute_cli_sync(
+    state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
+    app_type: CliApp,
+    proxy_url: String,
+    api_key: String,
+    model: Option<String>,
+    integration: Option<bool>,
+    models: Option<Vec<crate::proxy::common::model_catalog::DiscoverableModel>>,
+) -> Result<(), String> {
+    let resolved_models = match models {
+        Some(list) => Some(list),
+        None if matches!(app_type, CliApp::DeepSeekHarness | CliApp::GrokBuild) => {
+            crate::commands::proxy::resolve_proxy_discoverable_models(&state)
+                .await
+                .ok()
+        }
+        None => None,
+    };
+    execute_cli_sync_with_models(
+        app_type,
+        proxy_url,
+        api_key,
+        model,
+        integration,
+        resolved_models,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -2329,35 +2360,256 @@ fn sync_dsh_credentials_content(content: &str, api_key: &str) -> Result<String, 
     Ok(doc.as_source().to_owned())
 }
 
-fn build_dsh_provider_block(proxy_url: &str, selected_model: &str) -> String {
+fn fallback_discoverable_models() -> Vec<crate::proxy::common::model_catalog::DiscoverableModel> {
+    use crate::proxy::common::{
+        model_catalog::{discoverable_ids, effort_base, group_models, DiscoverableModel},
+        model_mapping::{get_supported_models, is_model_compliant_with_baseline},
+    };
+
+    let mut ids: std::collections::HashSet<String> = get_supported_models().into_iter().collect();
+    let derived: Vec<String> = ids
+        .iter()
+        .filter_map(|id| {
+            effort_base(id)
+                .or_else(|| id.strip_suffix("-tiered"))
+                .or_else(|| id.strip_suffix("-thinking"))
+                .filter(|base| !base.is_empty() && is_model_compliant_with_baseline(base))
+                .map(str::to_owned)
+        })
+        .collect();
+    ids.extend(derived);
+
+    let groups = group_models(ids.into_iter().collect(), &std::collections::HashMap::new());
+    discoverable_ids(groups, |_| true)
+        .into_iter()
+        .map(|id| {
+            let (context_limit, output_limit) =
+                crate::proxy::handlers::openai::resolve_model_token_limits(&id);
+            let display_name = crate::models::OfficialModelCatalog::get(&id)
+                .and_then(|info| info.display_name)
+                .map(|dn| crate::proxy::common::model_mapping::clean_tier_from_display_name(&dn));
+            let reasoning_efforts = crate::proxy::model_specs::discoverable_efforts_for(&id, None);
+            DiscoverableModel {
+                id,
+                display_name,
+                context_limit,
+                output_limit,
+                reasoning_efforts,
+            }
+        })
+        .collect()
+}
+
+fn select_gateway_default_model(
+    requested: Option<&str>,
+    models: &[crate::proxy::common::model_catalog::DiscoverableModel],
+) -> Option<String> {
+    if models.is_empty() {
+        return None;
+    }
+
+    let is_chat = |id: &str| {
+        let lower = id.to_ascii_lowercase();
+        !lower.contains("image") && !lower.starts_with("imagen")
+    };
+    let chat_models: Vec<&crate::proxy::common::model_catalog::DiscoverableModel> =
+        models.iter().filter(|m| is_chat(&m.id)).collect();
+
+    if let Some(req) = requested.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(exact) = models.iter().find(|m| m.id == req) {
+            return Some(exact.id.clone());
+        }
+        if let Some(ci) = models.iter().find(|m| m.id.eq_ignore_ascii_case(req)) {
+            return Some(ci.id.clone());
+        }
+        let req_lower = req.to_ascii_lowercase();
+        if let Some(base) = crate::proxy::common::model_catalog::effort_base(&req_lower) {
+            if let Some(matched) = models.iter().find(|m| m.id.eq_ignore_ascii_case(base)) {
+                return Some(matched.id.clone());
+            }
+        }
+        let variant_prefix = format!("{req_lower}-");
+        if let Some(matched) = chat_models
+            .iter()
+            .find(|m| m.id.to_ascii_lowercase().starts_with(&variant_prefix))
+        {
+            return Some(matched.id.clone());
+        }
+        if let Some(family) = req_lower.split('-').next().filter(|s| !s.is_empty()) {
+            let family_prefix = format!("{family}-");
+            if let Some(matched) = chat_models.iter().find(|m| {
+                !crate::proxy::upstream::gemini_app::is_app_model_id(&m.id)
+                    && m.id.to_ascii_lowercase().starts_with(&family_prefix)
+            }) {
+                return Some(matched.id.clone());
+            }
+            if let Some(matched) = chat_models
+                .iter()
+                .find(|m| m.id.to_ascii_lowercase().starts_with(&family_prefix))
+            {
+                return Some(matched.id.clone());
+            }
+        }
+    }
+
+    for preferred in [
+        "gemini-3.8-flash",
+        "gemini-3.1-pro",
+        "claude-sonnet-4-6",
+        "gpt-oss-120b",
+    ] {
+        if let Some(found) = chat_models
+            .iter()
+            .find(|m| m.id.eq_ignore_ascii_case(preferred))
+        {
+            return Some(found.id.clone());
+        }
+        let prefix = format!("{preferred}-");
+        if let Some(found) = chat_models
+            .iter()
+            .find(|m| m.id.to_ascii_lowercase().starts_with(&prefix))
+        {
+            return Some(found.id.clone());
+        }
+    }
+
+    chat_models
+        .first()
+        .copied()
+        .or_else(|| models.first())
+        .map(|m| m.id.clone())
+}
+
+fn sync_grokbuild_toml_content(
+    content: &str,
+    proxy_url: &str,
+    api_key: &str,
+    model: Option<&str>,
+    models: &[crate::proxy::common::model_catalog::DiscoverableModel],
+) -> Result<String, String> {
+    use toml_edit::{value, DocumentMut, Item, Table};
+
+    let mut doc = content
+        .parse::<DocumentMut>()
+        .unwrap_or_else(|_| DocumentMut::new());
+
+    let normalized_proxy_url = {
+        let trimmed = proxy_url.trim().trim_end_matches('/');
+        if trimmed.ends_with("/v1") {
+            trimmed.to_string()
+        } else {
+            format!("{}/v1", trimmed)
+        }
+    };
+    let normalize_root = |url: &str| {
+        url.trim()
+            .trim_end_matches('/')
+            .trim_end_matches("/v1")
+            .trim_end_matches('/')
+            .to_string()
+    };
+    let target_root = normalize_root(&normalized_proxy_url);
+
+    let default_model_id = select_gateway_default_model(model, models)
+        .ok_or_else(|| "No available gateway models".to_string())?;
+
+    let models_sec = doc.entry("models").or_insert(Item::Table(Table::new()));
+    if let Some(m_table) = models_sec.as_table_mut() {
+        m_table.insert("default", value(&default_model_id));
+    }
+
+    let active_ids: std::collections::HashSet<&str> =
+        models.iter().map(|m| m.id.as_str()).collect();
+    let model_sec = doc.entry("model").or_insert(Item::Table(Table::new()));
+    if let Some(m_table) = model_sec.as_table_mut() {
+        let stale_keys: Vec<String> = m_table
+            .iter()
+            .filter_map(|(k, item)| {
+                let base_url = item.get("base_url").and_then(|v| v.as_str())?;
+                (normalize_root(base_url) == target_root && !active_ids.contains(k))
+                    .then(|| k.to_string())
+            })
+            .collect();
+        for key in stale_keys {
+            m_table.remove(&key);
+        }
+
+        for m in models {
+            let context_window = if m.context_limit > 0 {
+                m.context_limit
+            } else {
+                1_048_576
+            };
+            let name = m
+                .display_name
+                .as_deref()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(&m.id);
+            let image_input = !crate::proxy::upstream::gemini_app::is_app_model_id(&m.id);
+            let entry = m_table.entry(&m.id).or_insert(Item::Table(Table::new()));
+            if let Some(t) = entry.as_table_mut() {
+                t.insert("model", value(&m.id));
+                t.insert("base_url", value(&normalized_proxy_url));
+                t.insert("name", value(name));
+                t.insert("api_backend", value("responses"));
+                t.insert("context_window", value(context_window));
+                t.insert("image_input", value(image_input));
+                if !api_key.is_empty() {
+                    t.insert("api_key", value(api_key));
+                }
+            }
+        }
+    }
+
+    Ok(doc.to_string())
+}
+
+fn build_dsh_provider_block(
+    proxy_url: &str,
+    models: &[crate::proxy::common::model_catalog::DiscoverableModel],
+) -> String {
     use std::fmt::Write;
 
-    let models = get_core_gateway_models();
-    let selected_extra = (!models.iter().any(|model| model.id == selected_model))
-        .then_some((selected_model, 1_048_576));
-    let models = selected_extra
-        .into_iter()
-        .chain(models.iter().map(|model| (model.id, model.context_window)));
     let mut out = format!(
         "displayName: Antigravity Manager\napiKeyEnv: ANTIGRAVITY_API_KEY\napi: openai-completions\nbaseURL: {}\nmodels:\n",
         Value::from(proxy_url)
     );
-    for (id, context_window) in models {
+    for model in models {
+        let name = model
+            .display_name
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or(&model.id);
+        let context_window = if model.context_limit > 0 {
+            model.context_limit
+        } else {
+            1_048_576
+        };
+        let max_tokens = if model.output_limit > 0 {
+            model.output_limit
+        } else {
+            65_536
+        };
+        let input = if crate::proxy::upstream::gemini_app::is_app_model_id(&model.id) {
+            "[text]"
+        } else {
+            "[text, image]"
+        };
         let _ = writeln!(
             out,
-            "  - id: {id_yaml}\n    name: {id_yaml}\n    contextWindow: {context_window}\n    input: [text, image]\n    maxTokens: 128000",
-            id_yaml = Value::from(id),
+            "  - id: {id_yaml}\n    name: {name_yaml}\n    contextWindow: {context_window}\n    input: {input}\n    maxTokens: {max_tokens}",
+            id_yaml = Value::from(model.id.as_str()),
+            name_yaml = Value::from(name),
         );
-        let efforts = crate::proxy::model_specs::available_efforts_for(id);
-        if !efforts.is_empty() {
+        if !model.reasoning_efforts.is_empty() {
             out.push_str("    reasoningEfforts:\n      off: null\n");
-            for effort in &efforts {
-                let level = if effort == "extra-low" {
-                    "minimal"
-                } else {
-                    effort
+            for effort in &model.reasoning_efforts {
+                let level = match effort.as_str() {
+                    "extra-low" => "minimal",
+                    "x-high" => "xhigh",
+                    other => other,
                 };
-                let _ = writeln!(out, "      {level}: {effort}");
+                let _ = writeln!(out, "      {level}: {}", Value::from(effort.as_str()));
             }
         }
     }
@@ -2434,11 +2686,24 @@ fn dsh_entry_config(doc: &mut YamlDoc, id: &str) -> Result<String, String> {
     Ok(path)
 }
 
+#[cfg(test)]
 fn sync_dsh_cordis_patch_content(
     content: &str,
     proxy_url: &str,
     selected_model: &str,
 ) -> Result<String, String> {
+    let fallback = fallback_discoverable_models();
+    sync_dsh_cordis_patch_content_with_models(content, proxy_url, Some(selected_model), &fallback)
+}
+
+fn sync_dsh_cordis_patch_content_with_models(
+    content: &str,
+    proxy_url: &str,
+    selected_model: Option<&str>,
+    models: &[crate::proxy::common::model_catalog::DiscoverableModel],
+) -> Result<String, String> {
+    let resolved_default = select_gateway_default_model(selected_model, models)
+        .ok_or_else(|| "No available gateway models".to_string())?;
     let mut doc = YamlDoc::parse(if content.trim().is_empty() {
         "[]\n"
     } else {
@@ -2454,7 +2719,7 @@ fn sync_dsh_cordis_patch_content(
     dsh_set(
         &mut doc,
         &format!("{providers}/antigravity"),
-        &build_dsh_provider_block(proxy_url, selected_model),
+        &build_dsh_provider_block(proxy_url, models),
     )?;
 
     let default = dsh_entry_config(&mut doc, "agent-default-model")?;
@@ -2462,7 +2727,7 @@ fn sync_dsh_cordis_patch_content(
     dsh_set(
         &mut doc,
         &format!("{default}/model"),
-        &Value::from(selected_model).to_string(),
+        &Value::from(resolved_default.as_str()).to_string(),
     )?;
     Ok(doc.as_source().to_owned())
 }
@@ -2665,6 +2930,7 @@ refs:
     #[test]
     fn test_sync_dsh_cordis_patch_content() {
         let empty = "[]";
+        // Stale `-high` suffix is normalized to the aggregated bare model in the catalog
         let res1 = sync_dsh_cordis_patch_content(
             empty,
             "http://127.0.0.1:8045/v1",
@@ -2675,8 +2941,12 @@ refs:
             dsh_patch_status(&res1),
             (
                 Some("http://127.0.0.1:8045/v1".to_string()),
-                Some("gemini-3.8-flash-high".to_string())
+                Some("gemini-3.8-flash".to_string())
             )
+        );
+        assert!(
+            !res1.contains("gemini-3.8-flash-high"),
+            "unaggregated -high duplicate must not be injected: {res1}"
         );
         let doc = YamlDoc::parse(&res1).unwrap();
         let provider = dsh_last_entry(&doc, "llm-pi-ai").unwrap();
@@ -2732,7 +3002,7 @@ refs:
         assert!(res2.contains("- id: kimi-chat"));
         assert!(!res2.contains("default: null"));
 
-        // 二次同步覆盖（更新模型与代理端口）
+        // 二次同步覆盖（更新模型与代理端口，gpt-oss-120b-medium 归一为聚合裸名 gpt-oss-120b）
         let res3 =
             sync_dsh_cordis_patch_content(&res2, "http://127.0.0.1:9000/v1", "gpt-oss-120b-medium")
                 .unwrap();
@@ -2740,10 +3010,113 @@ refs:
             dsh_patch_status(&res3),
             (
                 Some("http://127.0.0.1:9000/v1".to_string()),
-                Some("gpt-oss-120b-medium".to_string())
+                Some("gpt-oss-120b".to_string())
             )
         );
         assert!(!res3.contains("baseURL: http://127.0.0.1:8045/v1"));
+        assert!(!res3.contains("gpt-oss-120b-medium"));
         assert!(res3.contains("kimi-k3:"));
+    }
+
+    #[test]
+    fn dsh_and_grokbuild_sync_live_discoverable_models_without_static_duplicates() {
+        use crate::proxy::common::model_catalog::DiscoverableModel;
+
+        let discoverable = vec![
+            DiscoverableModel {
+                id: "gemini-4-neon".to_string(),
+                display_name: Some("Gemini 4 Neon".to_string()),
+                context_limit: 1_048_576,
+                output_limit: 65_536,
+                reasoning_efforts: vec![
+                    "low".to_string(),
+                    "medium".to_string(),
+                    "high".to_string(),
+                    "xhigh".to_string(),
+                ],
+            },
+            DiscoverableModel {
+                id: "gpt-oss-120b".to_string(),
+                display_name: Some("GPT-OSS 120B".to_string()),
+                context_limit: 131_072,
+                output_limit: 32_768,
+                reasoning_efforts: Vec::new(),
+            },
+            DiscoverableModel {
+                id: "gemini-app-neon".to_string(),
+                display_name: None,
+                context_limit: 512_000,
+                output_limit: 65_536,
+                reasoning_efforts: Vec::new(),
+            },
+        ];
+
+        let dsh_yaml = sync_dsh_cordis_patch_content_with_models(
+            "[]",
+            "http://127.0.0.1:8045/v1",
+            Some("gemini-3.8-flash-high"),
+            &discoverable,
+        )
+        .unwrap();
+        assert_eq!(
+            dsh_patch_status(&dsh_yaml),
+            (
+                Some("http://127.0.0.1:8045/v1".to_string()),
+                Some("gemini-4-neon".to_string()),
+            )
+        );
+        assert!(dsh_yaml.contains("id: \"gemini-4-neon\""));
+        assert!(dsh_yaml.contains("xhigh: \"xhigh\""));
+        assert!(dsh_yaml.contains("id: \"gemini-app-neon\""));
+        assert!(dsh_yaml.contains("contextWindow: 512000"));
+        assert!(dsh_yaml.contains("maxTokens: 32768"));
+        assert!(!dsh_yaml.contains("gemini-3.8-flash"));
+        assert!(!dsh_yaml.contains("claude-opus-5-5"));
+
+        // Verify neither gpt-oss-120b nor gemini-app-neon received reasoningEfforts
+        let doc = YamlDoc::parse(&dsh_yaml).unwrap();
+        let idx = dsh_last_entry(&doc, "llm-pi-ai").unwrap();
+        let prefix = format!("/{idx}/config/providers/antigravity/models");
+        assert!(dsh_node(&doc, &format!("{prefix}/0/reasoningEfforts")).is_some());
+        assert!(dsh_node(&doc, &format!("{prefix}/1/reasoningEfforts")).is_none());
+        assert!(dsh_node(&doc, &format!("{prefix}/2/reasoningEfforts")).is_none());
+
+        // GrokBuild sync: removes stale gateway models for same URL, keeps user models, sets valid default
+        let existing_grok = r#"[models]
+default = "gemini-3.8-flash-high"
+
+[model."gemini-3.8-flash-high"]
+base_url = "http://127.0.0.1:8045/v1"
+model = "gemini-3.8-flash-high"
+
+[model."grok-official"]
+base_url = "https://api.x.ai/v1"
+model = "grok-3"
+"#;
+        let grok_toml = sync_grokbuild_toml_content(
+            existing_grok,
+            "http://127.0.0.1:8045",
+            "sk-fixture",
+            Some("gemini-3.8-flash-high"),
+            &discoverable,
+        )
+        .unwrap();
+        let parsed: toml_edit::DocumentMut = grok_toml.parse().unwrap();
+        assert_eq!(parsed["models"]["default"].as_str(), Some("gemini-4-neon"));
+        let model_table = parsed["model"].as_table().unwrap();
+        assert!(!model_table.contains_key("gemini-3.8-flash-high"));
+        assert!(model_table.contains_key("grok-official"));
+        assert_eq!(
+            model_table["gemini-4-neon"]["context_window"].as_integer(),
+            Some(1_048_576)
+        );
+        assert_eq!(
+            model_table["gemini-app-neon"]["context_window"].as_integer(),
+            Some(512_000)
+        );
+        assert_eq!(
+            model_table["gemini-app-neon"]["image_input"].as_bool(),
+            Some(false)
+        );
     }
 }

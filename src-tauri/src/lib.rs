@@ -844,6 +844,7 @@ pub fn run() {
             commands::proxy::stop_proxy_service,
             commands::proxy::get_proxy_status,
             commands::proxy::get_proxy_model_catalog,
+            commands::proxy::get_proxy_discoverable_models,
             commands::proxy::get_proxy_stats,
             commands::proxy::get_proxy_logs,
             commands::proxy::get_proxy_logs_paginated,

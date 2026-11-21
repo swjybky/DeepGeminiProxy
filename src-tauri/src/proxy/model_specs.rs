@@ -566,6 +566,71 @@ pub fn available_efforts_for(model_id: &str) -> Vec<String> {
     out
 }
 
+/// 解析对外发现模型（如聚合后的裸模型或具名 `-tiered` 模型）真实支持的可选思考档位。
+///
+/// 与 [`DynamicTierRouter::resolve_with_pool`] 保持严格同口径：
+/// - 优先读取当前账号池加载到的动态档位（使冷启动尚未写入内存官方目录的 `gemini-4-neon` 等也能拿到完整档位）；
+/// - 已固定后缀的具名档位（如 `-high`/`-low`）、`-lite`、`-agent`、`-thinking`、生图模型及 `gemini-app-*` 不暴露多余档位；
+/// - 至少存在 2 个可选档位时才返回列表（排除 `gpt-oss-120b` 单一 `-medium` 后缀）。
+pub(crate) fn discoverable_efforts_for(
+    model_id: &str,
+    token_manager: Option<&crate::proxy::token_manager::TokenManager>,
+) -> Vec<String> {
+    use crate::proxy::common::model_catalog::effort_base;
+
+    let clean = model_id.trim().to_lowercase();
+    if clean.is_empty()
+        || clean.starts_with("auto:")
+        || crate::proxy::upstream::gemini_app::is_app_model_id(&clean)
+        || effort_base(&clean).is_some()
+        || clean.ends_with("-lite")
+        || clean.ends_with("-agent")
+        || clean.ends_with("-thinking")
+        || clean.contains("image")
+        || clean.starts_with("imagen")
+    {
+        return Vec::new();
+    }
+
+    let base = if clean.contains("claude") {
+        crate::proxy::common::model_mapping::canonicalize_claude_client_model_id(&clean)
+    } else if clean == "gemini-3-flash" {
+        "gemini-3.8-flash".to_string()
+    } else {
+        clean
+    };
+
+    if !crate::proxy::common::model_mapping::is_model_compliant_with_baseline(&base) {
+        return Vec::new();
+    }
+
+    let mut tiers = token_manager.map_or_else(Vec::new, |pool| pool.available_effort_tiers(&base));
+    if tiers.is_empty() {
+        tiers = crate::models::OfficialModelCatalog::collect_tiers_for_base(&base);
+    }
+
+    let mut out = Vec::new();
+    for (want, aliases) in [
+        ("extra-low", &["extra-low"][..]),
+        ("low", &["low"][..]),
+        ("medium", &["medium"][..]),
+        ("high", &["high"][..]),
+        ("xhigh", &["xhigh", "x-high"][..]),
+        ("max", &["max"][..]),
+    ] {
+        if tiers
+            .iter()
+            .any(|t| aliases.iter().any(|a| t.eq_ignore_ascii_case(a)))
+        {
+            out.push(want.to_string());
+        }
+    }
+    if out.len() < 2 {
+        return Vec::new();
+    }
+    out
+}
+
 /// 通用裸模型档位路由器 (Unified Bare Model Tier Router)
 pub fn resolve_bare_tiered_model_route(model: &str, client_effort: Option<&str>) -> Option<String> {
     DynamicTierRouter::resolve(model, client_effort)
@@ -883,5 +948,60 @@ mod tests {
             Some((3, 5))
         );
         assert_eq!(parse_claude_version_tuple("gemini-3.8-flash"), None);
+    }
+
+    #[tokio::test]
+    async fn discoverable_efforts_reflect_pool_and_catalog_tiers_only_when_selectable() {
+        assert_eq!(
+            discoverable_efforts_for("gemini-3.8-flash", None),
+            vec!["low", "medium", "high"]
+        );
+        assert_eq!(
+            discoverable_efforts_for("gemini-3.1-pro", None),
+            vec!["low", "high"]
+        );
+        assert!(discoverable_efforts_for("gemini-3.8-flash-high", None).is_empty());
+        assert!(discoverable_efforts_for("gemini-3.8-flash-tiered", None).is_empty());
+        assert!(discoverable_efforts_for("gpt-oss-120b", None).is_empty());
+        assert!(discoverable_efforts_for("gemini-app-neon", None).is_empty());
+        assert!(discoverable_efforts_for("gemini-3.1-flash-image", None).is_empty());
+
+        let dir = tempfile::tempdir().unwrap();
+        let accounts_dir = dir.path().join("accounts");
+        std::fs::create_dir_all(&accounts_dir).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        let account = serde_json::json!({
+            "id": "fixture",
+            "email": "fixture@example.test",
+            "token": {
+                "access_token": "test-only",
+                "refresh_token": "test-only",
+                "expires_in": 3600,
+                "expiry_timestamp": now + 3600
+            },
+            "quota": {"models": [
+                {"name": "gemini-4-neon-low", "percentage": 90},
+                {"name": "gemini-4-neon-medium", "percentage": 90},
+                {"name": "gemini-4-neon-high", "percentage": 90},
+                {"name": "gemini-4-neon-xhigh", "percentage": 90},
+                {"name": "gemini-4-hydrogen-tiered", "percentage": 90},
+                {"name": "gemini-4-hydrogen-tiered-high", "percentage": 90},
+                {"name": "gemini-4-hydrogen-tiered-xhigh", "percentage": 90}
+            ]},
+            "created_at": now,
+            "last_used": now
+        });
+        std::fs::write(accounts_dir.join("fixture.json"), account.to_string()).unwrap();
+        let manager = crate::proxy::TokenManager::new(dir.path().into());
+        assert_eq!(manager.load_accounts().await.unwrap(), 1);
+
+        assert_eq!(
+            discoverable_efforts_for("gemini-4-neon", Some(&manager)),
+            vec!["low", "medium", "high", "xhigh"]
+        );
+        assert_eq!(
+            discoverable_efforts_for("gemini-4-hydrogen-tiered", Some(&manager)),
+            vec!["high", "xhigh"]
+        );
     }
 }
