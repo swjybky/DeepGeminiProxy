@@ -80,7 +80,7 @@ export function CliSyncCard({ proxyUrl, apiKey, className }: CliSyncCardProps) {
         setPending(previous => ({ ...previous, [app]: true }));
         try {
             if (enabled) {
-                await configureAgent(app, proxyUrl, apiKey, statuses[app]?.status);
+                await configureAgent(app, proxyUrl, apiKey);
             } else {
                 await disconnectAgent(app);
             }

@@ -103,6 +103,34 @@ fn scan_windows_cli_paths(cmd: &str) -> Option<PathBuf> {
     None
 }
 
+// Desktop launches can inherit a shorter PATH than an interactive shell.
+pub(super) fn scan_cli_install_paths(cmd: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    return scan_windows_cli_paths(cmd);
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = dirs::home_dir().unwrap_or_default();
+        let mut directories = vec![
+            home.join(".local/bin"),
+            home.join(".bun/bin"),
+            home.join(".bun/install/global/node_modules/.bin"),
+            home.join(".npm-global/bin"),
+            home.join(".volta/bin"),
+            home.join("bin"),
+            PathBuf::from("/opt/homebrew/bin"),
+            PathBuf::from("/usr/local/bin"),
+            PathBuf::from("/usr/bin"),
+        ];
+        if let Ok(versions) = fs::read_dir(home.join(".nvm/versions/node")) {
+            directories.extend(versions.flatten().map(|entry| entry.path().join("bin")));
+        }
+        directories
+            .into_iter()
+            .map(|dir| dir.join(cmd))
+            .find(|path| path.is_file())
+    }
+}
+
 /// 解析 where 命令输出获取第一个有效路径
 #[cfg(target_os = "windows")]
 fn parse_where_output(output: &[u8]) -> Option<PathBuf> {
@@ -462,60 +490,10 @@ pub fn check_cli_installed(app: &CliApp) -> (bool, Option<String>) {
             }
         }
 
-        #[cfg(target_os = "windows")]
-        if let Some(found_path) = scan_windows_cli_paths(cmd) {
+        if let Some(found_path) = scan_cli_install_paths(cmd) {
             installed = true;
             executable_path = found_path;
             break;
-        }
-
-        // [FIX #765] macOS 增强检测: 如果 which 失败,显式搜索常用二进制路径
-        // 解决 Tauri 进程 PATH 可能不完整导致检测不到已安装 CLI 的问题
-        if !cfg!(target_os = "windows") {
-            let home = dirs::home_dir().unwrap_or_default();
-            let mut common_paths = vec![
-                home.join(".local/bin"),
-                home.join(".bun/bin"),
-                home.join(".bun/install/global/node_modules/.bin"),
-                home.join(".npm-global/bin"),
-                home.join(".volta/bin"),
-                home.join("bin"),
-                PathBuf::from("/opt/homebrew/bin"),
-                PathBuf::from("/usr/local/bin"),
-                PathBuf::from("/usr/bin"),
-            ];
-
-            // 增强：扫描 nvm 目录下的所有 node 版本
-            let nvm_base = home.join(".nvm/versions/node");
-            if nvm_base.exists() {
-                if let Ok(entries) = std::fs::read_dir(&nvm_base) {
-                    for entry in entries.flatten() {
-                        let bin_path = entry.path().join("bin");
-                        if bin_path.exists() {
-                            common_paths.push(bin_path);
-                        }
-                    }
-                }
-            }
-
-            let mut found_explicit = false;
-            for path in common_paths {
-                let full_path = path.join(cmd);
-                if full_path.exists() {
-                    tracing::debug!(
-                        "[CLI-Sync] Detected {} via explicit path: {:?}",
-                        cmd,
-                        full_path
-                    );
-                    installed = true;
-                    executable_path = full_path;
-                    found_explicit = true;
-                    break;
-                }
-            }
-            if found_explicit {
-                break;
-            }
         }
     }
 

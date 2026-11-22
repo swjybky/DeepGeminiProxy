@@ -1,6 +1,6 @@
 [package]
 name = "antigravity-tools"
-version = "1.0.4"
+version = "1.0.5"
 description = "Antigravity Tools"
 authors = ["you"]
 license = "CC-BY-NC-SA-4.0"
@@ -92,7 +92,8 @@ zeroize = "1"
 gtk = "0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_Packaging_Appx"] }
+windows-sys = { version = "0.59", features = ["Win32_Security_Cryptography", "Win32_Storage_Packaging_Appx"] }
+zeroize = "1"
 winreg = "0.55"
 
 [features]

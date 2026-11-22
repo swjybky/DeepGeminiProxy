@@ -16,22 +16,10 @@ pub struct DeepWriteStatus {
 
 #[tauri::command]
 pub async fn get_deepwrite_sync_status(proxy_url: String) -> Result<DeepWriteStatus, String> {
-    #[cfg(target_os = "macos")]
-    return macos::status(&proxy_url);
-    #[cfg(target_os = "windows")]
-    {
-        let _ = proxy_url;
-        let (installed, version) = tokio::task::spawn_blocking(|| {
-            super::windows_agent_install::find_nsis_installation("DeepWrite", "DeepWrite.exe")
-        })
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    return tokio::task::spawn_blocking(move || desktop::status(&proxy_url))
         .await
         .map_err(|err| err.to_string())?;
-        Ok(DeepWriteStatus {
-            installed: Some(installed),
-            version,
-            ..DeepWriteStatus::default()
-        })
-    }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = proxy_url;
@@ -41,7 +29,7 @@ pub async fn get_deepwrite_sync_status(proxy_url: String) -> Result<DeepWriteSta
 
 #[tauri::command]
 pub async fn execute_deepwrite_sync(state: State<'_, ProxyServiceState>) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
         let server = state
             .instance
@@ -51,46 +39,57 @@ pub async fn execute_deepwrite_sync(state: State<'_, ProxyServiceState>) -> Resu
             .ok_or("请先启动 Antigravity 网关。")?
             .axum_server
             .clone();
-        return macos::connect(server.port, &server.integration_api_key().await).await;
+        return desktop::connect(server.port, &server.integration_api_key().await).await;
     }
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = state;
-        Err("DeepWrite 一键接入目前仅支持 macOS。".into())
+        Err("DeepWrite 一键接入目前支持 macOS 和 Windows。".into())
     }
 }
 
 #[tauri::command]
 pub async fn execute_deepwrite_clear() -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    return macos::disconnect();
-    #[cfg(not(target_os = "macos"))]
-    Err("DeepWrite 一键接入目前仅支持 macOS。".into())
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    return tokio::task::spawn_blocking(desktop::disconnect)
+        .await
+        .map_err(|err| err.to_string())?;
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    Err("DeepWrite 一键接入目前支持 macOS 和 Windows。".into())
 }
 
-#[cfg(target_os = "macos")]
-mod macos {
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+mod desktop {
     use super::DeepWriteStatus;
+    #[cfg(target_os = "macos")]
     use aes::cipher::{BlockEncrypt, KeyInit};
     use base64::{engine::general_purpose::STANDARD, Engine};
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
     use std::{
         collections::{BTreeSet, HashSet},
-        fs::{self, File, OpenOptions},
-        io::{ErrorKind, Read, Seek, SeekFrom, Write},
-        os::unix::fs::OpenOptionsExt,
+        fs::{self, OpenOptions},
+        io::{ErrorKind, Write},
         path::{Path, PathBuf},
-        process::Stdio,
         time::Duration,
+    };
+    #[cfg(target_os = "macos")]
+    use std::{
+        fs::File,
+        io::{Read, Seek, SeekFrom},
+        os::unix::fs::OpenOptionsExt,
+        process::Stdio,
     };
     use zeroize::Zeroizing;
 
     const PROVIDER_ID: &str = "DeepGemini";
+    #[cfg(target_os = "macos")]
     const ASAR_HEADER_LIMIT: u32 = 16 * 1024 * 1024;
+    #[cfg(target_os = "macos")]
     const PACKAGE_JSON_LIMIT: u64 = 1024 * 1024;
     static SYNC_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+    #[cfg(target_os = "macos")]
     fn installed_app(home: &Path) -> Option<PathBuf> {
         [PathBuf::from("/Applications"), home.join("Applications")]
             .into_iter()
@@ -98,6 +97,7 @@ mod macos {
             .find(|app| app.join("Contents/MacOS/DeepWrite").is_file())
     }
 
+    #[cfg(target_os = "macos")]
     fn read_asar_package(mut archive: File) -> Option<Value> {
         // ASAR starts with a little-endian Pickle containing the header size,
         // then a Pickle containing the JSON file index. Offsets follow both.
@@ -131,6 +131,7 @@ mod macos {
         serde_json::from_slice(&contents).ok()
     }
 
+    #[cfg(target_os = "macos")]
     fn electron_storage_name(app: &Path) -> Result<String, String> {
         let resources = app.join("Contents/Resources");
         let package = match File::open(resources.join("app.asar")) {
@@ -178,8 +179,8 @@ mod macos {
         }
     }
 
-    fn model_path(home: &Path) -> Result<PathBuf, String> {
-        let parent = home.join("Library/Application Support/@deepwrite");
+    fn model_path(data_dir: &Path) -> Result<PathBuf, String> {
+        let parent = data_dir.join("@deepwrite");
         let profile = match read_json(&parent.join(".desktop.storage-location.json"))? {
             None => parent.join("desktop"),
             Some(state) => {
@@ -188,8 +189,9 @@ mod macos {
                 }
                 let path = state["currentPath"]
                     .as_str()
+                    .filter(|path| !path.contains('\0'))
                     .map(PathBuf::from)
-                    .filter(|path| path.is_absolute() && state["version"] == 1)
+                    .filter(|path| path.is_absolute())
                     .ok_or("DeepWrite 的数据目录配置无效。")?;
                 path
             }
@@ -197,27 +199,73 @@ mod macos {
         Ok(profile.join("config/models.json"))
     }
 
-    fn installed_profile() -> Result<(PathBuf, PathBuf), String> {
-        let home = dirs::home_dir().ok_or("无法定位当前用户的目录。")?;
-        let app = installed_app(&home).ok_or("未检测到 DeepWrite 桌面版。")?;
-        let path = model_path(&home)?;
+    fn installed_model_path() -> Result<PathBuf, String> {
+        let path = model_path(&data_dir()?)?;
         if !path.is_file() {
             return Err("请先在 DeepWrite 中初始化模型配置。".into());
         }
-        Ok((app, path))
+        Ok(path)
     }
 
-    fn load_models(path: &Path) -> Result<Value, String> {
+    fn data_dir() -> Result<PathBuf, String> {
+        dirs::data_dir().ok_or_else(|| "无法定位当前用户的应用数据目录。".into())
+    }
+
+    struct ModelConfig {
+        settings: Value,
+        legacy_secrets: Option<Value>,
+    }
+
+    fn load_models(path: &Path) -> Result<ModelConfig, String> {
         let value = read_json(path)?.ok_or("DeepWrite 模型配置不存在。")?;
-        if value["version"] != 3
-            || !value["models"].is_array()
-            || !value["encryptedApiKeys"].is_object()
-        {
+        if !value["models"].is_array() {
+            return Err("DeepWrite 模型配置中的模型列表无效。".into());
+        }
+        let legacy_secrets = match value.get("encryptedApiKeys") {
+            Some(keys) if keys.is_object() => None,
+            Some(_) => return Err("DeepWrite 的模型密钥配置格式无效。".into()),
+            None => {
+                let secrets = match read_json(&path.with_file_name("model-secrets.json"))? {
+                    Some(secrets) => secrets,
+                    // Only these layouts can be identified without either key map.
+                    None if matches!(value["version"].as_u64(), Some(1 | 2)) => {
+                        json!({ "version": 1, "encryptedApiKeys": {} })
+                    }
+                    None => return Err("无法识别 DeepWrite 的模型密钥存储格式。".into()),
+                };
+                if !secrets["encryptedApiKeys"].is_object() {
+                    return Err("DeepWrite 的独立密钥配置格式无效。".into());
+                }
+                Some(secrets)
+            }
+        };
+        Ok(ModelConfig {
+            settings: value,
+            legacy_secrets,
+        })
+    }
+
+    fn ensure_profile_can_be_edited(path: &Path, version: Option<&str>) -> Result<(), String> {
+        let config = load_models(path)?;
+        let lacks_shared_lock = config.legacy_secrets.is_some()
+            || version.is_some_and(|version| {
+                let parts: Vec<_> = version
+                    .trim_start_matches(['v', 'V'])
+                    .split(['-', '+'])
+                    .next()
+                    .unwrap_or_default()
+                    .split('.')
+                    .take(3)
+                    .map(str::parse::<u64>)
+                    .collect();
+                matches!(parts.as_slice(), [Ok(major), Ok(minor), Ok(patch)] if (*major, *minor, *patch) < (1, 8, 3))
+            });
+        if lacks_shared_lock && crate::modules::process::is_process_running_by_name("DeepWrite") {
             return Err(
-                "DeepWrite 模型配置版本不受支持。请在新版 DeepWrite 打开一次后重试。".into(),
+                "此版本的 DeepWrite 不支持同时编辑模型配置，请退出 DeepWrite 后重试。".into(),
             );
         }
-        Ok(value)
+        Ok(())
     }
 
     struct ConfigLock(PathBuf);
@@ -232,10 +280,7 @@ mod macos {
         let dir = path.with_file_name(".locks").join("models.json/.deepwrite");
         fs::create_dir_all(&dir).map_err(|err| format!("无法创建 DeepWrite 配置锁：{err}"))?;
         let path = dir.join("transaction.lock");
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
+        let mut file = private_file_options()
             .open(&path)
             .map_err(|err| match err.kind() {
                 ErrorKind::AlreadyExists => "DeepWrite 模型配置正被占用，请稍后重试。".into(),
@@ -245,26 +290,34 @@ mod macos {
         let acquired_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .map_err(|err| format!("无法生成配置锁时间：{err}"))?;
-        let owner = json!({ "pid": std::process::id(), "token": uuid::Uuid::new_v4().simple().to_string()[..16], "acquiredAt": acquired_at });
+        let owner = json!({
+            "pid": std::process::id(),
+            "token": uuid::Uuid::new_v4().simple().to_string()[..8],
+            "acquiredAt": acquired_at
+        });
         writeln!(file, "{owner}")
             .and_then(|()| file.sync_all())
             .map_err(|err| format!("无法写入 DeepWrite 配置锁：{err}"))?;
         Ok(lock)
     }
 
-    fn save_models(path: &Path, value: &Value) -> Result<(), String> {
+    fn private_file_options() -> OpenOptions {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(target_os = "macos")]
+        options.mode(0o600);
+        options
+    }
+
+    fn save_json(path: &Path, value: &Value) -> Result<(), String> {
         let tmp = path.with_file_name(format!(".models-antigravity-{}.tmp", uuid::Uuid::new_v4()));
         let result = (|| -> std::io::Result<()> {
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&tmp)?;
+            let mut file = private_file_options().open(&tmp)?;
             serde_json::to_writer_pretty(&mut file, value)?;
             file.write_all(b"\n")?;
             file.sync_all()?;
-            fs::rename(&tmp, path)?;
-            File::open(path.parent().expect("configuration has a parent"))?.sync_all()
+            drop(file);
+            fs::rename(&tmp, path)
         })();
         if result.is_err() {
             let _ = fs::remove_file(&tmp);
@@ -299,27 +352,26 @@ mod macos {
     }
 
     fn update_models(
-        config: &mut Value,
+        settings: &mut Value,
+        secrets: Option<&mut Value>,
         models: &BTreeSet<String>,
         base_url: &str,
         secret: &str,
     ) -> Result<(), String> {
-        let entries = config["models"].as_array_mut().unwrap();
-        let prior: Vec<_> = entries
-            .iter()
-            .filter(|model| is_managed(model))
-            .cloned()
-            .collect();
-        let managed_ids: HashSet<_> = prior
+        // Some v1 readers reject the entire configuration above 50 models.
+        let max_models = if secrets.is_some() && settings["version"] == 1 {
+            50
+        } else {
+            100
+        };
+        let entries = settings["models"].as_array_mut().unwrap();
+        let (managed, manual): (Vec<_>, Vec<_>) =
+            entries.iter().partition(|model| is_managed(model));
+        let ids: HashSet<_> = manual
             .iter()
             .filter_map(|model| model["id"].as_str())
             .collect();
-        let ids: HashSet<_> = entries
-            .iter()
-            .filter(|model| !is_managed(model))
-            .filter_map(|model| model["id"].as_str())
-            .collect();
-        if entries.len() - prior.len() + models.len() > 100 {
+        if manual.len() + models.len() > max_models && !models.is_empty() {
             return Err("DeepWrite 模型数量超过上限，请移除不使用的模型后重试。".into());
         }
         if models
@@ -328,6 +380,10 @@ mod macos {
         {
             return Err("DeepWrite 中已有同 ID 的自定义模型，未覆盖现有配置。".into());
         }
+        let managed_ids: HashSet<_> = managed
+            .into_iter()
+            .filter_map(|model| model["id"].as_str().map(str::to_owned))
+            .collect();
         entries.retain(|model| !is_managed(model));
         for model in models {
             entries.push(json!({
@@ -336,15 +392,17 @@ mod macos {
                 "reasoning": false, "defaultThinkingLevel": "off"
             }));
         }
-        let keys = config["encryptedApiKeys"].as_object_mut().unwrap();
-        keys.retain(|id, _| !managed_ids.contains(id.as_str()));
+        let keys = secrets.unwrap_or(&mut *settings)["encryptedApiKeys"]
+            .as_object_mut()
+            .unwrap();
+        keys.retain(|id, _| !managed_ids.contains(id));
         for model in models {
             keys.insert(managed_id(model), json!(secret));
         }
-        if config["defaultModelId"].as_str().is_some_and(|id| {
+        if settings["defaultModelId"].as_str().is_some_and(|id| {
             managed_ids.contains(id) && !models.iter().any(|model| managed_id(model) == id)
         }) {
-            config["defaultModelId"] = json!("");
+            settings["defaultModelId"] = json!("");
         }
         Ok(())
     }
@@ -356,19 +414,60 @@ mod macos {
         secret: &str,
     ) -> Result<(), String> {
         let _guard = acquire_config_lock(path)?;
-        let mut config = load_models(path)?;
-        update_models(&mut config, models, base_url, secret)?;
-        save_models(path, &config)
+        let ModelConfig {
+            mut settings,
+            legacy_secrets,
+        } = load_models(path)?;
+        let mut next_secrets = legacy_secrets.clone();
+        update_models(
+            &mut settings,
+            next_secrets.as_mut(),
+            models,
+            base_url,
+            secret,
+        )?;
+        if let (Some(previous), Some(next)) = (legacy_secrets, next_secrets) {
+            let secrets_path = path.with_file_name("model-secrets.json");
+            let had_secrets = secrets_path.try_exists().map_err(|err| err.to_string())?;
+            // Keep removed credentials available until the old model list is replaced.
+            let mut staged = previous.clone();
+            staged["encryptedApiKeys"]
+                .as_object_mut()
+                .unwrap()
+                .extend(next["encryptedApiKeys"].as_object().unwrap().clone());
+            if staged != previous {
+                save_json(&secrets_path, &staged)?;
+            }
+            if let Err(error) = save_json(path, &settings) {
+                if staged != previous {
+                    let restore = if had_secrets {
+                        save_json(&secrets_path, &previous)
+                    } else {
+                        fs::remove_file(&secrets_path).map_err(|err| err.to_string())
+                    };
+                    restore.map_err(|err| format!("{error}；还原独立密钥配置失败：{err}"))?;
+                }
+                return Err(error);
+            }
+            if next != staged {
+                save_json(&secrets_path, &next)
+                    .map_err(|err| format!("DeepWrite 模型配置已更新，但清理旧密钥失败：{err}"))?;
+            }
+        } else {
+            save_json(path, &settings)?;
+        }
+        #[cfg(target_os = "macos")]
+        File::open(path.parent().expect("configuration has a parent"))
+            .and_then(|directory| directory.sync_all())
+            .map_err(|err| format!("无法同步 DeepWrite 配置目录：{err}"))?;
+        Ok(())
     }
 
-    pub(super) fn status(proxy_url: &str) -> Result<DeepWriteStatus, String> {
+    #[cfg(target_os = "macos")]
+    fn installed_version() -> Result<(bool, Option<String>), String> {
         let home = dirs::home_dir().ok_or("无法定位当前用户的目录。")?;
         let Some(app) = installed_app(&home) else {
-            return Ok(DeepWriteStatus {
-                installed: Some(false),
-                integration_supported: true,
-                ..DeepWriteStatus::default()
-            });
+            return Ok((false, None));
         };
         let version = plist::Value::from_file(app.join("Contents/Info.plist"))
             .ok()
@@ -379,13 +478,38 @@ mod macos {
                     .as_string()
                     .map(str::to_owned)
             });
-        let path = model_path(&home)?;
-        let config = if path.is_file() {
-            load_models(&path)?
-        } else {
-            Value::Null
+        Ok((true, version))
+    }
+
+    #[cfg(target_os = "windows")]
+    fn installed_version() -> Result<(bool, Option<String>), String> {
+        Ok(super::super::windows_agent_install::find_nsis_installation(
+            "DeepWrite",
+            "DeepWrite.exe",
+        ))
+    }
+
+    pub(super) fn status(proxy_url: &str) -> Result<DeepWriteStatus, String> {
+        let (installed, version) = installed_version()?;
+        let status = DeepWriteStatus {
+            installed: Some(installed),
+            integration_supported: true,
+            version,
+            ..DeepWriteStatus::default()
         };
-        let managed: Vec<_> = config["models"]
+        if !installed {
+            return Ok(status);
+        }
+        let path = model_path(&data_dir()?)?;
+        if !path.try_exists().map_err(|err| err.to_string())? {
+            return Ok(status);
+        }
+        let ModelConfig {
+            settings,
+            legacy_secrets,
+        } = load_models(&path)?;
+        let keys = &legacy_secrets.as_ref().unwrap_or(&settings)["encryptedApiKeys"];
+        let managed: Vec<_> = settings["models"]
             .as_array()
             .into_iter()
             .flatten()
@@ -407,17 +531,12 @@ mod macos {
             })
             .map(str::to_owned);
         Ok(DeepWriteStatus {
-            installed: Some(true),
-            integration_supported: true,
-            version,
             is_synced: !managed.is_empty()
                 && managed.iter().all(|model| {
                     model["baseUrl"] == proxy_url
-                        && model["id"].as_str().is_some_and(|id| {
-                            config["encryptedApiKeys"][id]
-                                .as_str()
-                                .is_some_and(|key| !key.is_empty())
-                        })
+                        && model["id"]
+                            .as_str()
+                            .is_some_and(|id| keys[id].as_str().is_some_and(|key| !key.is_empty()))
                 }),
             integration_enabled: !managed.is_empty(),
             current_base_url,
@@ -425,11 +544,15 @@ mod macos {
                 .first()
                 .and_then(|model| model["modelId"].as_str())
                 .map(str::to_owned),
-            files: vec![],
+            ..status
         })
     }
 
-    async fn encrypt_gateway_key(key: &str, storage_name: &str) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    async fn encrypt_gateway_key(key: &str, _model_path: &Path) -> Result<String, String> {
+        let home = dirs::home_dir().ok_or("无法定位当前用户的目录。")?;
+        let app = installed_app(&home).ok_or("未检测到 DeepWrite 桌面版。")?;
+        let storage_name = electron_storage_name(&app)?;
         let service = format!("{storage_name} Safe Storage");
         let account = format!("{storage_name} Key");
         let result = tokio::time::timeout(
@@ -459,6 +582,7 @@ mod macos {
         Ok(encrypt_v10(key.as_bytes(), password))
     }
 
+    #[cfg(target_os = "macos")]
     fn encrypt_v10(secret: &[u8], password: &[u8]) -> String {
         // Electron's synchronous macOS safeStorage format (Chromium OSCrypt v10).
         let mut key = Zeroizing::new([0u8; 16]);
@@ -485,13 +609,110 @@ mod macos {
         STANDARD.encode(payload)
     }
 
+    #[cfg(target_os = "windows")]
+    async fn encrypt_gateway_key(key: &str, model_path: &Path) -> Result<String, String> {
+        let local_state = model_path
+            .parent()
+            .and_then(Path::parent)
+            .ok_or("无法定位 DeepWrite 的 Windows 加密配置。")?
+            .join("Local State");
+        let state =
+            read_json(&local_state)?.ok_or("请先启动一次 DeepWrite，初始化 Windows 安全存储。")?;
+        let mut wrapped_key = state["os_crypt"]["encrypted_key"]
+            .as_str()
+            .and_then(|value| STANDARD.decode(value).ok())
+            .ok_or("DeepWrite 的 Windows 安全存储缺少加密密钥。")?;
+        if !wrapped_key.starts_with(b"DPAPI") || wrapped_key.len() == 5 {
+            return Err("无法识别 DeepWrite 的 Windows 加密密钥格式。".into());
+        }
+        let storage_key = unprotect_windows_key(&mut wrapped_key[5..])?;
+        encrypt_windows_v10(key.as_bytes(), &storage_key)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn unprotect_windows_key(encrypted: &mut [u8]) -> Result<Zeroizing<[u8; 32]>, String> {
+        use std::ptr::{null, null_mut};
+        use windows_sys::Win32::{
+            Foundation::LocalFree,
+            Security::Cryptography::{
+                CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+            },
+        };
+        use zeroize::Zeroize;
+
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: encrypted
+                .len()
+                .try_into()
+                .map_err(|_| "Windows 加密密钥过大。")?,
+            pbData: encrypted.as_mut_ptr(),
+        };
+        let mut output = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: null_mut(),
+        };
+        // SAFETY: input points to encrypted for the duration of the call; DPAPI allocates output.
+        let success = unsafe {
+            CryptUnprotectData(
+                &input,
+                null_mut(),
+                null(),
+                null(),
+                null(),
+                CRYPTPROTECT_UI_FORBIDDEN,
+                &mut output,
+            )
+        };
+        if success == 0 || output.pbData.is_null() {
+            return Err("无法在当前 Windows 用户下解锁 DeepWrite 的安全存储。".into());
+        }
+        let mut key = Zeroizing::new([0; 32]);
+        // SAFETY: On success DPAPI returns cbData bytes owned by this call; free them with LocalFree.
+        let valid_length = unsafe {
+            let bytes = std::slice::from_raw_parts_mut(output.pbData, output.cbData as usize);
+            let valid = bytes.len() == key.len();
+            if valid {
+                key.copy_from_slice(bytes);
+            }
+            bytes.zeroize();
+            LocalFree(output.pbData.cast());
+            valid
+        };
+        if !valid_length {
+            return Err("DeepWrite 的 Windows 加密密钥长度无效。".into());
+        }
+        Ok(key)
+    }
+
+    #[cfg(target_os = "windows")]
+    fn encrypt_windows_v10(secret: &[u8], key: &[u8; 32]) -> Result<String, String> {
+        use aes_gcm::{
+            aead::{Aead, AeadCore, OsRng},
+            Aes256Gcm, KeyInit,
+        };
+
+        // Electron synchronous safeStorage on Windows reads the Chromium v10 AES-GCM envelope.
+        let cipher = Aes256Gcm::new(key.into());
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+        let ciphertext = cipher
+            .encrypt(&nonce, secret)
+            .map_err(|_| "无法加密 DeepWrite 的网关密钥。")?;
+        let mut payload = b"v10".to_vec();
+        payload.extend_from_slice(&nonce);
+        payload.extend_from_slice(&ciphertext);
+        Ok(STANDARD.encode(payload))
+    }
+
     pub(super) async fn connect(port: u16, key: &str) -> Result<(), String> {
         let _sync = SYNC_LOCK
             .try_lock()
             .map_err(|_| "DeepWrite 接入设置正在更新。")?;
-        let (app, path) = installed_profile()?;
-        load_models(&path)?;
-        let storage_name = electron_storage_name(&app)?;
+        let (installed, version) = installed_version()?;
+        if !installed {
+            return Err("未检测到 DeepWrite 桌面版。".into());
+        }
+        let path = installed_model_path()?;
+        ensure_profile_can_be_edited(&path, version.as_deref())?;
         if key.trim().is_empty() {
             return Err("请先为 Antigravity 网关配置 API Key。".into());
         }
@@ -523,7 +744,11 @@ mod macos {
         if models.is_empty() {
             return Err("网关没有可用的 Gemini 对话模型。".into());
         }
-        let secret = encrypt_gateway_key(key, &storage_name).await?;
+        let secret = encrypt_gateway_key(key, &path).await?;
+        if installed_model_path()? != path {
+            return Err("DeepWrite 的数据目录已变更，请重新接入。".into());
+        }
+        ensure_profile_can_be_edited(&path, version.as_deref())?;
         write_integration(&path, &models, &base_url, &secret)
     }
 
@@ -531,7 +756,9 @@ mod macos {
         let _sync = SYNC_LOCK
             .try_lock()
             .map_err(|_| "DeepWrite 接入设置正在更新。")?;
-        let (_, path) = installed_profile()?;
+        let path = installed_model_path()?;
+        let (_, version) = installed_version()?;
+        ensure_profile_can_be_edited(&path, version.as_deref())?;
         write_integration(&path, &BTreeSet::new(), "", "")
     }
 
@@ -539,6 +766,7 @@ mod macos {
     mod tests {
         use super::*;
 
+        #[cfg(target_os = "macos")]
         fn test_asar(package: &Value) -> Vec<u8> {
             let contents = serde_json::to_vec(package).unwrap();
             let header = serde_json::to_vec(&json!({
@@ -558,6 +786,7 @@ mod macos {
         }
 
         #[test]
+        #[cfg(target_os = "macos")]
         fn resolves_safe_storage_name_from_packaged_electron_manifest() {
             let fixture = tempfile::tempdir().unwrap();
             let app = fixture.path().join("DeepWrite.app");
@@ -587,11 +816,76 @@ mod macos {
         }
 
         #[test]
+        #[cfg(target_os = "macos")]
         fn encrypts_key_in_electron_safe_storage_format() {
             assert_eq!(
                 encrypt_v10(b"invalid-fixture-key", b"fixture-password"),
                 "djEwmV3BoBYpeDTPGK7SdM/7NLC8KVBnwPSxALana2VWRQs="
             );
+        }
+
+        #[tokio::test]
+        #[cfg(target_os = "windows")]
+        async fn encrypts_key_in_windows_electron_safe_storage_format() {
+            use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
+            use std::ptr::{null, null_mut};
+            use windows_sys::Win32::{
+                Foundation::LocalFree,
+                Security::Cryptography::{
+                    CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
+                },
+            };
+
+            let mut key = [42; 32];
+            let input = CRYPT_INTEGER_BLOB {
+                cbData: key.len() as u32,
+                pbData: key.as_mut_ptr(),
+            };
+            let mut output = CRYPT_INTEGER_BLOB {
+                cbData: 0,
+                pbData: null_mut(),
+            };
+            // SAFETY: input points to the fixture key; output is initialized by DPAPI.
+            let success = unsafe {
+                CryptProtectData(
+                    &input,
+                    null(),
+                    null(),
+                    null(),
+                    null(),
+                    CRYPTPROTECT_UI_FORBIDDEN,
+                    &mut output,
+                )
+            };
+            assert_ne!(success, 0);
+            assert!(!output.pbData.is_null());
+            let mut wrapped = b"DPAPI".to_vec();
+            // SAFETY: output owns cbData bytes after success and must be released with LocalFree.
+            unsafe {
+                wrapped.extend_from_slice(std::slice::from_raw_parts(
+                    output.pbData,
+                    output.cbData as usize,
+                ));
+                LocalFree(output.pbData.cast());
+            }
+            let profile = tempfile::tempdir().unwrap();
+            save_json(
+                &profile.path().join("Local State"),
+                &json!({
+                    "os_crypt": { "encrypted_key": STANDARD.encode(wrapped) }
+                }),
+            )
+            .unwrap();
+            let models_path = profile.path().join("config/models.json");
+            let encoded = encrypt_gateway_key("fixture-gateway-key", &models_path)
+                .await
+                .unwrap();
+            let bytes = STANDARD.decode(encoded).unwrap();
+            assert_eq!(&bytes[..3], b"v10");
+            let decoded = Aes256Gcm::new((&key).into())
+                .decrypt(Nonce::from_slice(&bytes[3..15]), &bytes[15..])
+                .unwrap();
+            assert_eq!(decoded, b"fixture-gateway-key");
         }
 
         #[test]
@@ -609,7 +903,7 @@ mod macos {
             ], "encryptedApiKeys": { "manual": "test-ciphertext" }, "extra": [1, 2] });
             let profile = tempfile::tempdir().unwrap();
             let path = profile.path().join("models.json");
-            save_models(&path, &existing).unwrap();
+            save_json(&path, &existing).unwrap();
 
             let models = BTreeSet::from(["gemini-test".to_string()]);
             let connect =
@@ -618,7 +912,7 @@ mod macos {
 
             connect("stale-managed-ciphertext").unwrap();
             connect("new-managed-ciphertext").unwrap();
-            let updated = load_models(&path).unwrap();
+            let updated = load_models(&path).unwrap().settings;
             assert_eq!(updated["models"][1]["modelId"], "gemini-test");
             assert_eq!(updated["defaultModelId"], "manual");
             assert_eq!(updated["encryptedApiKeys"]["manual"], "test-ciphertext");
@@ -627,18 +921,131 @@ mod macos {
                 "new-managed-ciphertext"
             );
             connect("new-managed-ciphertext").unwrap();
-            assert_eq!(load_models(&path).unwrap(), updated);
+            assert_eq!(load_models(&path).unwrap().settings, updated);
 
             let lock = acquire_config_lock(&path).unwrap();
+            let owner = read_json(&lock.0).unwrap().unwrap();
+            assert_eq!(owner["token"].as_str().unwrap().len(), 8);
             assert_eq!(
                 disconnect().unwrap_err(),
                 "DeepWrite 模型配置正被占用，请稍后重试。"
             );
-            assert_eq!(load_models(&path).unwrap(), updated);
+            assert_eq!(load_models(&path).unwrap().settings, updated);
             drop(lock);
 
             disconnect().unwrap();
-            assert_eq!(load_models(&path).unwrap(), existing);
+            assert_eq!(load_models(&path).unwrap().settings, existing);
+        }
+
+        #[test]
+        fn preserves_legacy_settings_and_secrets_layouts() {
+            for (version, secrets_version) in [(1, 1), (2, 1), (90, 91)] {
+                let profile = tempfile::tempdir().unwrap();
+                let path = profile.path().join("models.json");
+                let secrets_path = path.with_file_name("model-secrets.json");
+                let settings = json!({
+                    "version": version, "defaultModelId": "manual",
+                    "models": [{ "id": "manual", "modelId": "gemini-manual" }],
+                    "extra": [1, 2]
+                });
+                let secrets = json!({
+                    "version": secrets_version, "encryptedApiKeys": { "manual": "fixture-secret" },
+                    "extra": true
+                });
+                save_json(&path, &settings).unwrap();
+                save_json(&secrets_path, &secrets).unwrap();
+                let models = BTreeSet::from(["gemini-test".to_string()]);
+                write_integration(&path, &models, "http://example.test/v1", "fixture").unwrap();
+                let current = load_models(&path).unwrap();
+                assert_eq!(current.settings["version"], version);
+                assert_eq!(current.settings["models"][1]["modelId"], "gemini-test");
+                assert!(current.settings.get("encryptedApiKeys").is_none());
+                assert_eq!(
+                    current.legacy_secrets.unwrap()["encryptedApiKeys"][managed_id("gemini-test")],
+                    "fixture"
+                );
+
+                write_integration(&path, &BTreeSet::new(), "", "").unwrap();
+                assert_eq!(read_json(&path).unwrap().unwrap(), settings);
+                assert_eq!(read_json(&secrets_path).unwrap().unwrap(), secrets);
+            }
+        }
+
+        #[test]
+        fn syncs_inline_keys_without_a_known_config_version() {
+            let profile = tempfile::tempdir().unwrap();
+            let path = profile.path().join("models.json");
+            let models = BTreeSet::from(["gemini-test".to_string()]);
+            for version in [None, Some(4), Some(500)] {
+                let mut settings = json!({
+                    "models": [], "encryptedApiKeys": {}, "anotherSetting": [true]
+                });
+                if let Some(version) = version {
+                    settings["version"] = json!(version);
+                }
+                save_json(&path, &settings).unwrap();
+                write_integration(&path, &models, "http://example.test/v1", "fixture").unwrap();
+
+                let current = load_models(&path).unwrap();
+                assert_eq!(current.settings.get("version"), settings.get("version"));
+                assert_eq!(current.settings["models"][0]["modelId"], "gemini-test");
+                assert_eq!(
+                    current.settings["encryptedApiKeys"][managed_id("gemini-test")],
+                    "fixture"
+                );
+                assert!(current.legacy_secrets.is_none());
+
+                write_integration(&path, &BTreeSet::new(), "", "").unwrap();
+                assert_eq!(read_json(&path).unwrap().unwrap(), settings);
+            }
+        }
+
+        #[test]
+        fn keeps_unrecognized_config_untouched() {
+            let profile = tempfile::tempdir().unwrap();
+            let path = profile.path().join("models.json");
+            let unknown = json!({ "version": 4, "models": [], "keys": {} });
+            save_json(&path, &unknown).unwrap();
+            let models = BTreeSet::from(["gemini-test".to_string()]);
+            assert!(
+                write_integration(&path, &models, "http://example.test/v1", "fixture").is_err()
+            );
+            assert_eq!(read_json(&path).unwrap().unwrap(), unknown);
+
+            let secrets_path = path.with_file_name("model-secrets.json");
+            let secrets = json!({ "version": 1, "encryptedApiKeys": {} });
+            save_json(&secrets_path, &secrets).unwrap();
+            let malformed = json!({ "version": 4, "models": [], "encryptedApiKeys": [] });
+            save_json(&path, &malformed).unwrap();
+            assert!(
+                write_integration(&path, &models, "http://example.test/v1", "fixture").is_err()
+            );
+            assert_eq!(read_json(&path).unwrap().unwrap(), malformed);
+            assert_eq!(read_json(&secrets_path).unwrap().unwrap(), secrets);
+        }
+
+        #[test]
+        fn resolves_relocated_profile_and_rejects_pending_migration() {
+            let profile = tempfile::tempdir().unwrap();
+            let root = profile.path().join("@deepwrite");
+            fs::create_dir(&root).unwrap();
+            assert_eq!(
+                model_path(profile.path()).unwrap(),
+                root.join("desktop/config/models.json")
+            );
+
+            let pointer = root.join(".desktop.storage-location.json");
+            let relocated = profile.path().join("relocated");
+            let mut state = json!({ "version": 42, "currentPath": relocated });
+            save_json(&pointer, &state).unwrap();
+            assert_eq!(
+                model_path(profile.path()).unwrap(),
+                relocated.join("config/models.json")
+            );
+
+            state["pending"] = json!({});
+            save_json(&pointer, &state).unwrap();
+            assert!(model_path(profile.path()).is_err());
         }
     }
 }

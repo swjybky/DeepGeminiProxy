@@ -3,6 +3,11 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.5 (2026-11-22)**:
+        -   Added one-click DeepWrite setup on Windows. Gateway credentials are encrypted using the current Windows user's secure storage.
+        -   DeepWrite setup recognizes both separate and inline credential storage by their configuration fields, so version upgrades keep working when the format stays compatible.
+        -   Improved installation detection for OpenClaw, OpenCode, Hermes, and Droid. OpenClaw automatic setup follows the model restrictions in the existing configuration.
+
     *   **v1.0.4 (2026-11-22)**:
         -   Fixed detection of DeepWrite and DeepSeek Harness on Windows in default locations and custom locations registered by their installers.
         -   Added detection for Codex desktop installations from the Microsoft Store or MSIX and Codex CLI installations from WinGet.

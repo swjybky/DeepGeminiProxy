@@ -3,6 +3,11 @@
 > DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.5 (2026-11-22)**:
+        -   新增 Windows 上的 DeepWrite 一键接入，使用当前 Windows 用户的安全存储加密网关密钥。
+        -   按模型列表和密钥字段识别 DeepWrite 配置，兼容独立密钥文件和合并配置。配置结构沿用时，DeepWrite 升级后仍可接入。
+        -   改善 OpenClaw、OpenCode、Hermes 和 Droid 的安装检测。OpenClaw 自动接入按现有配置更新模型限制。
+
     *   **v1.0.4 (2026-11-22)**:
         -   修复 Windows 上 DeepWrite 和 DeepSeek Harness 的桌面安装漏检，支持默认目录和由安装器登记的自定义目录。
         -   支持检测通过 Microsoft Store 或 MSIX 安装的 Codex 桌面版，以及通过 WinGet 安装的 CLI。

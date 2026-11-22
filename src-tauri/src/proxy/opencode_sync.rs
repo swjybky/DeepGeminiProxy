@@ -500,13 +500,10 @@ fn resolve_opencode_path() -> Option<PathBuf> {
 
     // Try fallback locations based on OS
     #[cfg(target_os = "windows")]
-    {
-        resolve_opencode_path_windows()
-    }
+    let installed = resolve_opencode_path_windows();
     #[cfg(not(target_os = "windows"))]
-    {
-        resolve_opencode_path_unix()
-    }
+    let installed = resolve_opencode_path_unix();
+    installed.or_else(|| super::cli_sync::scan_cli_install_paths("opencode"))
 }
 
 #[cfg(target_os = "windows")]

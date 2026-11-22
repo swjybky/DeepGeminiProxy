@@ -1596,7 +1596,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent 連線",
-                "deepwrite_hint": "無需退出 DeepWrite。開啟後，Gemini 模型會加入自訂模型的 DeepGemini 群組。",
+                "deepwrite_hint": "開啟後，Gemini 模型會加入自訂模型的 DeepGemini 群組。",
                 "description": "開啟開關，自動設定閘道位址、金鑰和模型。",
                 "connection_changed": "連線設定已變更",
                 "key_required": "請先設定閘道 API 金鑰，再開啟 Agent 連線。",

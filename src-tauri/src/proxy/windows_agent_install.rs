@@ -2,6 +2,7 @@ use std::{
     env,
     path::{Path, PathBuf},
     ptr::null_mut,
+    sync::LazyLock,
 };
 use windows_sys::Win32::{
     Foundation::ERROR_INSUFFICIENT_BUFFER, Storage::Packaging::Appx::GetPackagesByPackageFamily,
@@ -30,11 +31,13 @@ fn is_installed_executable(path: &Path, executable: &str) -> bool {
         && path.is_file()
 }
 
-fn matches_product(display_name: &str, product: &str, version: Option<&str>) -> bool {
-    display_name.eq_ignore_ascii_case(product)
-        || version.is_some_and(|version| {
-            display_name.eq_ignore_ascii_case(&format!("{product} {version}"))
-        })
+fn version_from_display_name<'a>(display_name: &'a str, product: &str) -> Option<&'a str> {
+    static VERSION: LazyLock<regex::Regex> = LazyLock::new(|| {
+        regex::Regex::new(r"^[vV]?[0-9]+(?:\.[0-9]+){1,3}(?:[-+][0-9A-Za-z.+-]+)?$").unwrap()
+    });
+    let prefix = display_name.get(..product.len())?;
+    let suffix = display_name.get(product.len()..)?.strip_prefix(' ')?.trim();
+    (prefix.eq_ignore_ascii_case(product) && VERSION.is_match(suffix)).then_some(suffix)
 }
 
 pub(super) fn find_nsis_installation(product: &str, executable: &str) -> (bool, Option<String>) {
@@ -51,8 +54,15 @@ pub(super) fn find_nsis_installation(product: &str, executable: &str) -> (bool, 
                     continue;
                 };
                 let display_name: String = entry.get_value("DisplayName").unwrap_or_default();
+                let display_name = display_name.trim();
+                let suffix = version_from_display_name(display_name, product);
                 let version: Option<String> = entry.get_value("DisplayVersion").ok();
-                if !matches_product(&display_name, product, version.as_deref()) {
+                let matches = display_name.eq_ignore_ascii_case(product)
+                    || suffix.is_some()
+                    || version.as_ref().is_some_and(|version| {
+                        display_name.eq_ignore_ascii_case(&format!("{product} {version}"))
+                    });
+                if !matches {
                     continue;
                 }
                 let location: String = entry.get_value("InstallLocation").unwrap_or_default();
@@ -62,7 +72,12 @@ pub(super) fn find_nsis_installation(product: &str, executable: &str) -> (bool, 
                     executable,
                 ) || is_installed_executable(display_icon_path(&icon), executable)
                 {
-                    return (true, version);
+                    return (
+                        true,
+                        version
+                            .filter(|value| !value.trim().is_empty())
+                            .or_else(|| suffix.map(str::to_owned)),
+                    );
                 }
             }
         }
@@ -108,17 +123,22 @@ mod tests {
 
     #[test]
     fn matches_names_with_the_nsis_version_suffix() {
-        assert!(matches_product(
-            "DeepWrite 1.8.5",
-            "DeepWrite",
+        assert_eq!(
+            version_from_display_name("DeepWrite 1.8.5", "DeepWrite"),
             Some("1.8.5")
-        ));
-        assert!(matches_product("DeepWrite", "DeepWrite", None));
-        assert!(!matches_product(
-            "DeepWrite Setup",
-            "DeepWrite",
-            Some("1.8.5")
-        ));
+        );
+        assert_eq!(
+            version_from_display_name("DeepSeek Harness v2.0.0-beta.1", "DeepSeek Harness"),
+            Some("v2.0.0-beta.1")
+        );
+        assert_eq!(
+            version_from_display_name("DeepWrite Setup", "DeepWrite"),
+            None
+        );
+        assert_eq!(
+            version_from_display_name("DeepWrite Helper 1.9.0", "DeepWrite"),
+            None
+        );
     }
 
     #[test]

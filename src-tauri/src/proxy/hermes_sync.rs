@@ -111,7 +111,7 @@ fn resolve_hermes_path() -> Option<PathBuf> {
             }
         }
     }
-    None
+    super::cli_sync::scan_cli_install_paths("hermes")
 }
 
 fn extract_version(raw: &str) -> String {

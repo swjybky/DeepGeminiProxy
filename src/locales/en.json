@@ -1686,7 +1686,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent Integrations",
-                "deepwrite_hint": "No need to quit DeepWrite. Connecting adds Gemini models to the DeepGemini group under Custom Models.",
+                "deepwrite_hint": "Connecting adds Gemini models to the DeepGemini group under Custom Models.",
                 "description": "Turn on an integration to configure its gateway connection and models.",
                 "connection_changed": "Configuration changed",
                 "key_required": "Set a gateway API key to enable Agent integrations.",

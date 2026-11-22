@@ -445,7 +445,7 @@ pub struct AxumServer {
 }
 
 impl AxumServer {
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     pub(crate) async fn integration_api_key(&self) -> zeroize::Zeroizing<String> {
         zeroize::Zeroizing::new(self.security_state.read().await.api_key.clone())
     }

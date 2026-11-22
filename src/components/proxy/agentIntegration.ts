@@ -15,8 +15,6 @@ export interface AgentStatus {
     current_base_url: string | null;
     current_model?: string | null;
     default_model?: string | null;
-    detected_version_target?: string | null;
-    synced_version?: string | null;
     restore_on_disconnect?: boolean;
     integration_enabled?: boolean;
     files: string[];
@@ -77,8 +75,6 @@ export async function getAgentStatus(app: AgentApp, proxyUrl: string): Promise<A
             isSynced: boolean;
             currentBaseUrl: string | null;
             defaultModel: string | null;
-            detectedVersionTarget: string | null;
-            syncedVersion: string | null;
             files: string[];
         }>('get_openclaw_sync_status', { proxyUrl: url });
         return {
@@ -87,8 +83,6 @@ export async function getAgentStatus(app: AgentApp, proxyUrl: string): Promise<A
             is_synced: status.isSynced,
             current_base_url: status.currentBaseUrl,
             default_model: status.defaultModel,
-            detected_version_target: status.detectedVersionTarget,
-            synced_version: status.syncedVersion,
             files: status.files,
         };
     }
@@ -141,7 +135,6 @@ export async function configureAgent(
     app: AgentApp,
     proxyUrl: string,
     apiKey: string,
-    status?: AgentStatus,
     providedModels?: DiscoverableModel[],
 ) {
     if (app === 'DeepWrite') return request('execute_deepwrite_sync');
@@ -174,7 +167,7 @@ export async function configureAgent(
         if (app === 'OpenClaw') {
             return request('execute_openclaw_sync', {
                 proxyUrl: url, apiKey, models: modelIds, activate: false,
-                targetVersion: status?.detected_version_target ?? status?.synced_version ?? 'v2',
+                targetVersion: 'auto',
             });
         }
 

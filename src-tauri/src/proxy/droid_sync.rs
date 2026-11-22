@@ -99,25 +99,7 @@ fn resolve_droid_path() -> Option<PathBuf> {
         }
     }
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(app_data) = env::var("APPDATA") {
-            let npm_path = PathBuf::from(&app_data).join("npm").join("droid.cmd");
-            if npm_path.exists() {
-                return Some(npm_path);
-            }
-        }
-        if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
-            let pnpm_path = PathBuf::from(&local_app_data)
-                .join("pnpm")
-                .join("droid.cmd");
-            if pnpm_path.exists() {
-                return Some(pnpm_path);
-            }
-        }
-    }
-
-    None
+    super::cli_sync::scan_cli_install_paths("droid")
 }
 
 fn extract_version(raw: &str) -> String {

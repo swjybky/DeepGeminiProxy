@@ -1,5 +1,5 @@
 # Antigravity Tools 🚀
-> DeepGeminiProxy (v1.0.4) 独立编号，请从 [DeepGeminiProxy Releases](https://github.com/swjybky/DeepGeminiProxy/releases) 下载安装包。
+> DeepGeminiProxy (v1.0.5) 独立编号，请从 [DeepGeminiProxy Releases](https://github.com/swjybky/DeepGeminiProxy/releases) 下载安装包。
 
 <div align="center">
   <img src="public/icon.png" width="100" height="100" alt="Antigravity Tools Logo">
@@ -11,7 +11,7 @@
       <img src="https://img.shields.io/github/v/release/swjybky/DeepGeminiProxy?color=blue&style=flat-square" alt="GitHub release">
     </a>
     <a href="https://github.com/swjybky/DeepGeminiProxy">
-      <img src="https://img.shields.io/badge/Version-1.0.4-blue?style=flat-square" alt="Version">
+      <img src="https://img.shields.io/badge/Version-1.0.5-blue?style=flat-square" alt="Version">
     </a>
     <img src="https://img.shields.io/badge/Tauri-v2-orange?style=flat-square" alt="Tauri">
     <img src="https://img.shields.io/badge/Backend-Rust-red?style=flat-square" alt="Rust">

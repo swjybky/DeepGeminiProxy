@@ -118,7 +118,7 @@ fn resolve_openclaw_path() -> Option<PathBuf> {
             }
         }
     }
-    None
+    super::cli_sync::scan_cli_install_paths("openclaw")
 }
 
 fn extract_version(raw: &str) -> String {
@@ -126,9 +126,10 @@ fn extract_version(raw: &str) -> String {
     for part in trimmed.split_whitespace() {
         let candidate = part.rsplit('/').next().unwrap_or(part);
         let clean = candidate
-            .strip_prefix('v')
-            .or_else(|| candidate.strip_prefix('V'))
-            .unwrap_or(candidate);
+            .trim_start_matches(['v', 'V'])
+            .split(['-', '+'])
+            .next()
+            .unwrap_or_default();
         if is_valid_version(clean) {
             return clean.to_string();
         }
@@ -154,35 +155,38 @@ fn is_valid_version(value: &str) -> bool {
 /// 判断版本是否 >= 2026.8.1 (v2.0)
 /// 例如: 2026.8.1 -> v2, 2026.9.2 -> v2, 2.0.0 -> v2
 /// 2026.7.749 -> v1, 1.0.0 -> v1
-pub fn classify_openclaw_version(version_str: &str) -> &'static str {
+fn classify_openclaw_version(version_str: &str) -> Option<&'static str> {
     let nums: Vec<u64> = version_str
+        .trim_start_matches(['v', 'V'])
+        .split(['-', '+'])
+        .next()?
         .split('.')
-        .filter_map(|part| part.parse::<u64>().ok())
-        .collect();
+        .map(str::parse)
+        .collect::<Result<_, _>>()
+        .ok()?;
 
-    if nums.is_empty() {
-        return "v2"; // 缺省使用最新 2.0
+    if nums.len() < 2 {
+        return None;
     }
 
     // 经典 SemVer: 2.x.x
     if nums[0] >= 2 && nums[0] < 1000 {
-        return "v2";
+        return Some("v2");
     }
 
     // 日期版本号: 2026.8.1 边界判断
     if nums[0] > 2026 {
-        return "v2";
+        return Some("v2");
     }
     if nums[0] == 2026 {
         let minor = nums.get(1).copied().unwrap_or(0);
         let patch = nums.get(2).copied().unwrap_or(0);
         if minor > 8 || (minor == 8 && patch >= 1) {
-            return "v2";
+            return Some("v2");
         }
-        return "v1";
     }
 
-    "v1"
+    Some("v1")
 }
 
 async fn run_version_command(mut command: Command, timeout: Duration) -> Option<String> {
@@ -217,7 +221,7 @@ pub async fn check_openclaw_installed() -> (bool, Option<String>, Option<String>
             let version = run_openclaw_version(&path).await;
             let target = version
                 .as_deref()
-                .map(classify_openclaw_version)
+                .and_then(classify_openclaw_version)
                 .map(str::to_string);
             (true, version, target)
         }
@@ -391,7 +395,7 @@ pub fn resolve_model_specs(model_id: &str) -> (u64, u64, bool, Vec<&'static str>
 pub fn sync_openclaw_provider(
     proxy_url: String,
     api_key: String,
-    target_version: String, // "v1" (<2026.8.1) or "v2" (>=2026.8.1)
+    target_version: String, // "v1", "v2" or "auto"
     models: Vec<String>,
     activate: bool,
     default_model: Option<String>,
@@ -446,7 +450,7 @@ pub fn sync_openclaw_provider(
     }
     config["models"]["providers"][PROVIDER_ID] = provider_entry;
 
-    // 3. 针对不同版本进行模型与白名单匹配
+    // 3. 更新当前配置使用的模型限制
     if config.get("agents").is_none() {
         config["agents"] = json!({});
     }
@@ -454,47 +458,7 @@ pub fn sync_openclaw_provider(
         config["agents"]["defaults"] = json!({});
     }
 
-    let is_v1 = target_version.eq_ignore_ascii_case("v1");
-
-    if is_v1 {
-        // v1.0 规范 (< 2026.8.1): 使用 agents.defaults.models 字典注册可用模型
-        if config["agents"]["defaults"].get("models").is_none() {
-            config["agents"]["defaults"]["models"] = json!({});
-        }
-        if let Some(map) = config["agents"]["defaults"]["models"].as_object_mut() {
-            // 清理旧的 antigravity-manager 记录
-            let keys_to_remove: Vec<String> = map
-                .keys()
-                .filter(|k| k.starts_with(&format!("{PROVIDER_ID}/")))
-                .cloned()
-                .collect();
-            for k in keys_to_remove {
-                map.remove(&k);
-            }
-            // 批量添加新同步模型
-            for m in &models {
-                map.insert(format!("{PROVIDER_ID}/{m}"), json!({}));
-            }
-        }
-    } else {
-        // v2.0 规范 (>= 2026.8.1): 使用 agents.defaults.modelPolicy.allow 白名单
-        if config["agents"]["defaults"].get("modelPolicy").is_none() {
-            config["agents"]["defaults"]["modelPolicy"] = json!({});
-        }
-        let allow_entry = format!("{PROVIDER_ID}/*");
-        let allow_arr = config["agents"]["defaults"]["modelPolicy"]
-            .get("allow")
-            .and_then(|v| v.as_array())
-            .cloned()
-            .unwrap_or_default();
-
-        let mut next_allow: Vec<Value> = allow_arr
-            .into_iter()
-            .filter(|value| !value.as_str().is_some_and(is_managed_provider))
-            .collect();
-        next_allow.push(json!(allow_entry));
-        config["agents"]["defaults"]["modelPolicy"]["allow"] = json!(next_allow);
-    }
+    update_model_policy(&mut config["agents"]["defaults"], &models, &target_version);
 
     // 4. 激活默认模型 (如勾选)
     let selected_default = default_model
@@ -513,6 +477,34 @@ pub fn sync_openclaw_provider(
     }
 
     atomically_write_config(&path, &config)
+}
+
+fn update_model_policy(defaults: &mut Value, models: &[String], target_version: &str) {
+    let is_v1 = target_version.eq_ignore_ascii_case("v1");
+    // Preserve unrestricted policies and legacy restrictions that OpenClaw has not migrated yet.
+    if !is_v1 && defaults["modelPolicy"].is_object() {
+        if let Some(allow) = defaults
+            .pointer_mut("/modelPolicy/allow")
+            .and_then(Value::as_array_mut)
+        {
+            if !allow.is_empty() && !models.is_empty() {
+                allow.retain(|value| !value.as_str().is_some_and(is_managed_provider));
+                allow.push(json!(format!("{PROVIDER_ID}/*")));
+            }
+        }
+        return;
+    }
+    if is_v1 && defaults.get("models").is_none() {
+        defaults["models"] = json!({});
+    }
+    if let Some(map) = defaults.get_mut("models").and_then(Value::as_object_mut) {
+        if is_v1 || !map.is_empty() {
+            map.retain(|id, _| !is_managed_provider(id));
+            for id in models {
+                map.insert(format!("{PROVIDER_ID}/{id}"), json!({}));
+            }
+        }
+    }
 }
 
 pub fn restore_openclaw_config() -> Result<(), String> {
@@ -714,7 +706,7 @@ pub async fn get_openclaw_sync_status(proxy_url: Option<String>) -> Result<OpenC
 pub async fn execute_openclaw_sync(
     proxy_url: String,
     api_key: String,
-    target_version: String, // "v1" or "v2"
+    target_version: String, // "v1", "v2" or "auto"
     models: Vec<String>,
     activate: bool,
     default_model: Option<String>,
@@ -760,12 +752,60 @@ mod tests {
 
     #[test]
     fn test_classify_openclaw_version() {
-        assert_eq!(classify_openclaw_version("2026.8.1"), "v2");
-        assert_eq!(classify_openclaw_version("2026.9.2"), "v2");
-        assert_eq!(classify_openclaw_version("2.0.0"), "v2");
-        assert_eq!(classify_openclaw_version("2026.7.749"), "v1");
-        assert_eq!(classify_openclaw_version("2026.7.1"), "v1");
-        assert_eq!(classify_openclaw_version("1.0.0"), "v1");
+        assert_eq!(classify_openclaw_version("2026.8.1"), Some("v2"));
+        assert_eq!(classify_openclaw_version("2026.9.2"), Some("v2"));
+        assert_eq!(classify_openclaw_version("2.0.0"), Some("v2"));
+        assert_eq!(classify_openclaw_version("2026.7.749"), Some("v1"));
+        assert_eq!(classify_openclaw_version("2026.7.1"), Some("v1"));
+        assert_eq!(classify_openclaw_version("1.0.0"), Some("v1"));
+        assert_eq!(classify_openclaw_version("v2026.8.1-beta.2"), Some("v2"));
+        assert_eq!(classify_openclaw_version("unknown"), None);
+    }
+
+    #[test]
+    fn explicit_v1_target_can_initialize_legacy_model_map() {
+        let mut defaults = json!({});
+        update_model_policy(&mut defaults, &["gemini-test".to_string()], "v1");
+        assert_eq!(
+            defaults,
+            json!({ "models": { "antigravity-manager/gemini-test": {} } })
+        );
+    }
+
+    #[test]
+    fn updates_existing_restrictions_without_restricting_unrestricted_configs() {
+        let models = ["gemini-test".to_string()];
+        let mut legacy = json!({ "models": {
+            "example/model": { "alias": "Manual" },
+            "antigravity-manager/old": {}
+        } });
+        update_model_policy(&mut legacy, &models, "auto");
+        assert_eq!(
+            legacy["models"],
+            json!({
+                "example/model": { "alias": "Manual" },
+                "antigravity-manager/gemini-test": {}
+            })
+        );
+        assert!(legacy.get("modelPolicy").is_none());
+
+        let mut restricted =
+            json!({ "modelPolicy": { "allow": ["example/model", "antigravity-manager/old"] } });
+        update_model_policy(&mut restricted, &models, "auto");
+        assert_eq!(
+            restricted["modelPolicy"]["allow"],
+            json!(["example/model", "antigravity-manager/*"])
+        );
+
+        for mut unrestricted in [
+            json!({}),
+            json!({"modelPolicy": {}}),
+            json!({ "modelPolicy": { "allow": [] } }),
+        ] {
+            let original = unrestricted.clone();
+            update_model_policy(&mut unrestricted, &models, "auto");
+            assert_eq!(unrestricted, original);
+        }
     }
 
     #[test]

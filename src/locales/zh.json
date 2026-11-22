@@ -1676,7 +1676,7 @@
         "cli_sync": {
             "integration": {
                 "title": "Agent 接入",
-                "deepwrite_hint": "无需退出 DeepWrite。开启后，Gemini 模型将添加到自定义模型的 DeepGemini 分组。",
+                "deepwrite_hint": "开启后，Gemini 模型将添加到自定义模型的 DeepGemini 分组。",
                 "description": "打开开关，自动配置网关地址、密钥和模型。",
                 "connection_changed": "连接配置已变更",
                 "key_required": "请先设置网关 API 密钥，再开启 Agent 接入。",
