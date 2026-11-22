@@ -36,6 +36,8 @@ pub mod sticky_config; // 粘性调度配置
 pub mod thinking_store; // 服务端完整思考块存储
 pub mod upstream; // 上游客户端
 pub mod video; // 视频处理模块
+#[cfg(target_os = "windows")]
+mod windows_agent_install;
 
 pub use cache_profile::{cache_profile, CacheProfile};
 pub use config::get_stream_timeout_config;

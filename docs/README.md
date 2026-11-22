@@ -21,5 +21,6 @@ Start with [AGENTS.md](../AGENTS.md). See [DESIGN.md](../DESIGN.md) for UI, [TES
 - [`docs/zai/notes.md`](zai/notes.md) — research notes, constraints, and future follow-ups (budget/usage, additional endpoints).
 
 ## Agent Integrations
+- [Windows Agent 安装检测](../error/windows-agent-installation.md) — DeepWrite、DeepSeek Harness 和 Codex 桌面版的检测入口。
 - [DeepWrite API Key 解密失败](../error/deepwrite-key-decryption.md) — macOS 接入后的密钥排查和重新同步。
 - [`docs/jeikcode_integration.md`](jeikcode_integration.md) — JeikCode integration guide, one-click synchronization, configuration options, and KV-cache optimization.

@@ -1603,6 +1603,8 @@
                 "gateway_stopped": "閘道尚未啟動。啟動後，已連線的工具即可使用。",
                 "connected": "已連線",
                 "disconnected": "未連線",
+                "detection_unavailable": "目前環境無法偵測安裝",
+                "installed_integration_unsupported": "已安裝 · 目前平台不支援一鍵接入",
                 "status_error": "設定偵測失敗",
                 "switch": "將 {{name}} 連線到閘道",
                 "disconnect_title": "中斷閘道連線",

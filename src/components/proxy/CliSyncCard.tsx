@@ -119,10 +119,13 @@ export function CliSyncCard({ proxyUrl, apiKey, className }: CliSyncCardProps) {
                     const status = result?.status;
                     const enabled = Boolean(status?.is_synced || status?.integration_enabled);
                     const busy = Boolean(pending[app]) || !result;
-                    const canEnable = Boolean(status?.installed && apiKey.trim());
+                    const integrationSupported = status?.integration_supported !== false;
+                    const canEnable = Boolean(integrationSupported && status?.installed && apiKey.trim());
                     const name = names[app];
                     const stateLabel = !result ? t('proxy.cli_sync.status.detecting')
                         : result.error ? t('proxy.cli_sync.integration.status_error')
+                        : status?.installed === null ? t('proxy.cli_sync.integration.detection_unavailable')
+                        : status?.installed && !integrationSupported ? t('proxy.cli_sync.integration.installed_integration_unsupported')
                         : status?.is_synced ? t('proxy.cli_sync.integration.connected')
                         : enabled ? t('proxy.cli_sync.integration.connection_changed')
                         : status?.installed ? t('proxy.cli_sync.integration.disconnected')
@@ -132,7 +135,7 @@ export function CliSyncCard({ proxyUrl, apiKey, className }: CliSyncCardProps) {
                         <article key={app} className={cn(
                             'rounded-xl border bg-white/70 p-4 dark:bg-base-100/70',
                             enabled ? 'border-primary/30' : 'border-gray-200/70 dark:border-base-300',
-                        )} title={app === 'DeepWrite' && status?.installed ? t('proxy.cli_sync.integration.deepwrite_hint') : undefined}>
+                        )} title={app === 'DeepWrite' && status?.installed && integrationSupported ? t('proxy.cli_sync.integration.deepwrite_hint') : undefined}>
                             <div className="flex items-center gap-3">
                                 <div className={cn(
                                     'flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl',

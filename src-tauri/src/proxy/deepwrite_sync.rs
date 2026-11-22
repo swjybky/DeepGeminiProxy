@@ -4,7 +4,8 @@ use tauri::State;
 
 #[derive(Default, Serialize)]
 pub struct DeepWriteStatus {
-    installed: bool,
+    installed: Option<bool>,
+    integration_supported: bool,
     version: Option<String>,
     is_synced: bool,
     integration_enabled: bool,
@@ -17,7 +18,21 @@ pub struct DeepWriteStatus {
 pub async fn get_deepwrite_sync_status(proxy_url: String) -> Result<DeepWriteStatus, String> {
     #[cfg(target_os = "macos")]
     return macos::status(&proxy_url);
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    {
+        let _ = proxy_url;
+        let (installed, version) = tokio::task::spawn_blocking(|| {
+            super::windows_agent_install::find_nsis_installation("DeepWrite", "DeepWrite.exe")
+        })
+        .await
+        .map_err(|err| err.to_string())?;
+        Ok(DeepWriteStatus {
+            installed: Some(installed),
+            version,
+            ..DeepWriteStatus::default()
+        })
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
         let _ = proxy_url;
         Ok(DeepWriteStatus::default())
@@ -347,11 +362,13 @@ mod macos {
     }
 
     pub(super) fn status(proxy_url: &str) -> Result<DeepWriteStatus, String> {
-        let Some(home) = dirs::home_dir() else {
-            return Ok(DeepWriteStatus::default());
-        };
+        let home = dirs::home_dir().ok_or("无法定位当前用户的目录。")?;
         let Some(app) = installed_app(&home) else {
-            return Ok(DeepWriteStatus::default());
+            return Ok(DeepWriteStatus {
+                installed: Some(false),
+                integration_supported: true,
+                ..DeepWriteStatus::default()
+            });
         };
         let version = plist::Value::from_file(app.join("Contents/Info.plist"))
             .ok()
@@ -390,7 +407,8 @@ mod macos {
             })
             .map(str::to_owned);
         Ok(DeepWriteStatus {
-            installed: true,
+            installed: Some(true),
+            integration_supported: true,
             version,
             is_synced: !managed.is_empty()
                 && managed.iter().all(|model| {

@@ -1683,6 +1683,8 @@
                 "gateway_stopped": "网关未启动。启动后，已接入的工具即可连接。",
                 "connected": "已接入",
                 "disconnected": "未接入",
+                "detection_unavailable": "当前环境无法检测安装",
+                "installed_integration_unsupported": "已安装 · 当前平台不支持一键接入",
                 "status_error": "配置检测失败",
                 "switch": "将 {{name}} 接入网关",
                 "disconnect_title": "断开网关",

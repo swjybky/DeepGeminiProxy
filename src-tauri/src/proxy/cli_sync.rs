@@ -24,13 +24,20 @@ fn scan_windows_cli_paths(cmd: &str) -> Option<PathBuf> {
     }
 
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
-        let pnpm_base = PathBuf::from(&local_app_data).join("pnpm");
+        let local_app_data = PathBuf::from(local_app_data);
+        let pnpm_base = local_app_data.join("pnpm");
         common_paths.push(pnpm_base.join(format!("{}.cmd", cmd)));
         common_paths.push(pnpm_base.join(cmd));
 
-        let yarn_base = PathBuf::from(local_app_data).join("Yarn").join("bin");
+        let yarn_base = local_app_data.join("Yarn").join("bin");
         common_paths.push(yarn_base.join(format!("{}.cmd", cmd)));
         common_paths.push(yarn_base.join(cmd));
+
+        common_paths.push(
+            local_app_data
+                .join("Microsoft/WinGet/Links")
+                .join(format!("{cmd}.exe")),
+        );
     }
 
     if let Some(home) = dirs::home_dir() {
@@ -233,6 +240,13 @@ pub struct CliConfigFile {
     pub path: PathBuf,
 }
 
+fn dsh_home(home: &Path) -> PathBuf {
+    std::env::var_os("DSH_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".dsh"))
+}
+
 impl CliApp {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -351,10 +365,7 @@ impl CliApp {
                 }]
             }
             CliApp::DeepSeekHarness => {
-                let dsh_dir = std::env::var_os("DSH_HOME")
-                    .filter(|path| !path.is_empty())
-                    .map(PathBuf::from)
-                    .unwrap_or_else(|| home.join(".dsh"));
+                let dsh_dir = dsh_home(&home);
                 vec![
                     CliConfigFile {
                         name: "profiles/desktop/cordis.patch.yml".to_string(),
@@ -546,39 +557,55 @@ pub fn check_cli_installed(app: &CliApp) -> (bool, Option<String>) {
     // 如果是 DeepSeek Harness 且常规检测未命中，尝试检测应用目录或 ~/.dsh 目录
     if !installed && app == &CliApp::DeepSeekHarness {
         #[cfg(target_os = "macos")]
+        for directory in std::iter::once(PathBuf::from("/Applications"))
+            .chain(dirs::home_dir().map(|home| home.join("Applications")))
         {
-            let mac_dsh = PathBuf::from(
-                "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh",
-            );
-            if mac_dsh.exists() {
-                executable_path = mac_dsh;
-                installed = true;
-            } else if PathBuf::from("/Applications/DeepSeek Harness.app").exists() {
+            let bundle = directory.join("DeepSeek Harness.app");
+            if bundle.is_dir() {
+                let bundled_cli = bundle.join("Contents/Resources/runtime/cli/bin/dsh");
+                if bundled_cli.is_file() {
+                    executable_path = bundled_cli;
+                    installed = true;
+                    break;
+                }
                 installed = true;
             }
         }
         #[cfg(target_os = "windows")]
-        if let Some(home) = dirs::home_dir() {
-            let win_paths = vec![
-                home.join(".dsh").join("bin").join("dsh.cmd"),
-                home.join(".dsh").join("bin").join("dsh.exe"),
-            ];
-            for p in win_paths {
-                if is_safe_path(&p) {
-                    executable_path = p;
+        {
+            let desktop = super::windows_agent_install::find_nsis_installation(
+                "DeepSeek Harness",
+                "DeepSeek Harness.exe",
+            );
+            if desktop.0 {
+                return desktop;
+            }
+            if let Some(home) = dirs::home_dir() {
+                let bin = dsh_home(&home).join("bin");
+                if let Some(path) = [bin.join("dsh.cmd"), bin.join("dsh.exe")]
+                    .into_iter()
+                    .find(is_safe_path)
+                {
+                    executable_path = path;
                     installed = true;
-                    break;
                 }
             }
         }
         if !installed {
             if let Some(home) = dirs::home_dir() {
-                let dsh_dir = home.join(".dsh");
-                if dsh_dir.exists() {
+                if dsh_home(&home).is_dir() {
                     installed = true;
                 }
             }
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    if !installed
+        && app == &CliApp::Codex
+        && super::windows_agent_install::has_codex_desktop_package()
+    {
+        return (true, None);
     }
 
     if !installed {

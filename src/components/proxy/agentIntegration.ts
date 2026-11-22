@@ -8,7 +8,8 @@ export const agentApps = [
 export type AgentApp = typeof agentApps[number];
 
 export interface AgentStatus {
-    installed: boolean;
+    installed: boolean | null;
+    integration_supported?: boolean;
     version: string | null;
     is_synced: boolean;
     current_base_url: string | null;
@@ -57,7 +58,16 @@ export async function getAgentStatus(app: AgentApp, proxyUrl: string): Promise<A
     const provider = providerFor(app);
     const url = endpoint(app, proxyUrl);
     if (app === 'DeepWrite') {
-        if (!isTauri()) return { installed: false, version: null, is_synced: false, current_base_url: null, files: [] };
+        if (!isTauri()) {
+            return {
+                installed: null,
+                integration_supported: false,
+                version: null,
+                is_synced: false,
+                current_base_url: null,
+                files: [],
+            };
+        }
         return request<AgentStatus>('get_deepwrite_sync_status', { proxyUrl: url });
     }
     if (app === 'OpenClaw') {

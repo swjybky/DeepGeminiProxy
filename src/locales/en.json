@@ -1693,6 +1693,8 @@
                 "gateway_stopped": "The gateway is stopped. Connected tools can use it once it starts.",
                 "connected": "Connected",
                 "disconnected": "Disconnected",
+                "detection_unavailable": "Installation detection unavailable in this environment",
+                "installed_integration_unsupported": "Installed · One-click setup unavailable on this platform",
                 "status_error": "Could not check configuration",
                 "switch": "Connect {{name}} to the gateway",
                 "disconnect_title": "Disconnect from gateway",
