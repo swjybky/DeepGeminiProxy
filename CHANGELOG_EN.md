@@ -3,6 +3,11 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.4 (2026-11-22)**:
+        -   Fixed detection of DeepWrite and DeepSeek Harness on Windows in default locations and custom locations registered by their installers.
+        -   Added detection for Codex desktop installations from the Microsoft Store or MSIX and Codex CLI installations from WinGet.
+        -   The DeepWrite card distinguishes installed, missing, and unavailable detection states. DeepWrite one-click setup is available on macOS.
+
     *   **v1.0.3 (2026-11-21)**:
         -   Gemini App grid cards show sign-in status, terms status, and the most recent model error, with actions to confirm the terms and view redacted diagnostics.
         -   Fixed the dashboard’s Gemini App account link opening the mini window instead of the main account page.

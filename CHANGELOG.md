@@ -3,6 +3,11 @@
 > DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.4 (2026-11-22)**:
+        -   修复 Windows 上 DeepWrite 和 DeepSeek Harness 的桌面安装漏检，支持默认目录和由安装器登记的自定义目录。
+        -   支持检测通过 Microsoft Store 或 MSIX 安装的 Codex 桌面版，以及通过 WinGet 安装的 CLI。
+        -   DeepWrite 卡片区分已安装、未检测到安装和当前环境无法检测。DeepWrite 一键接入仅支持 macOS。
+
     *   **v1.0.3 (2026-11-21)**:
         -   Gemini App 网格卡片展示登录状态、服务条款状态和最近一次模型错误，并提供条款确认和脱敏诊断入口。
         -   修复从仪表盘打开 Gemini App 账号时误进入迷你窗口的问题。
