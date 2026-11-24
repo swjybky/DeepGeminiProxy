@@ -10,6 +10,7 @@ Start with [AGENTS.md](../AGENTS.md). See [DESIGN.md](../DESIGN.md) for UI, [TES
 - [冷启动模型档位未聚合](../error/model-catalog-cold-start.md) — 模型目录、分组缓存与路由排查。
 - [`docs/proxy/auth.md`](proxy/auth.md) — proxy authorization modes, expected client behavior, and implementation pointers.
 - [`docs/proxy/accounts.md`](proxy/accounts.md) — account lifecycle in the proxy pool (including auto-disable on `invalid_grant`) and UI behavior.
+- [网关残留已删除账号](../error/proxy-deleted-account.md) — 排查配额刷新写回、账号池重载和会话绑定。
 - [Gemini App 上游](proxy/gemini-app.md) — 本机 App2API、直接 OAuth、模型选择与部署边界。
 - [Gemini App2API 反向代理技术报告](proxy/gemini-app2api-analysis.md) — 协议转换、流式交付边界及对 DeepGeminiProxy 的建议。
 

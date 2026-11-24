@@ -186,6 +186,7 @@ impl Drop for InFlightGuard {
 
 pub struct TokenManager {
     tokens: Arc<DashMap<String, ProxyToken>>, // account_id -> ProxyToken
+    account_reload_lock: tokio::sync::Mutex<()>,
     current_index: Arc<AtomicUsize>,
     last_used_account: Arc<tokio::sync::Mutex<Option<(String, std::time::Instant)>>>,
     data_dir: PathBuf,
@@ -242,6 +243,7 @@ impl TokenManager {
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
             tokens: Arc::new(DashMap::new()),
+            account_reload_lock: tokio::sync::Mutex::new(()),
             current_index: Arc::new(AtomicUsize::new(0)),
             last_used_account: Arc::new(tokio::sync::Mutex::new(None)),
             data_dir,
@@ -760,6 +762,8 @@ impl TokenManager {
 
     /// 从主应用账号目录加载所有账号
     pub async fn load_accounts(&self) -> Result<usize, String> {
+        // Commit reloads in order so an earlier disk snapshot cannot restore a deleted account.
+        let _reload = self.account_reload_lock.lock().await;
         let accounts_dir = self.resolved_data_dir().join("accounts");
 
         if !accounts_dir.exists() {
@@ -908,12 +912,18 @@ impl TokenManager {
 
         let count = new_tokens.len();
 
-        // 阶段 2：零停机平滑原子同步到 self.tokens
-        // 剔除已在磁盘删除或停用的账号
-        self.tokens.retain(|k, _| new_tokens.contains_key(k));
-        // 更新或插入新载入的有效账号
-        for (k, v) in new_tokens {
-            self.tokens.insert(k, v);
+        let removed_accounts: Vec<_> = self
+            .tokens
+            .iter()
+            .filter(|entry| !new_tokens.contains_key(entry.key()))
+            .map(|entry| entry.key().clone())
+            .collect();
+        // Install replacements before removing stale entries so concurrent requests can select them.
+        for (account_id, token) in new_tokens {
+            self.tokens.insert(account_id, token);
+        }
+        for account_id in removed_accounts {
+            self.evict_account(&account_id);
         }
 
         // 若上次记录的使用账号已不在池中，则安全清理
@@ -932,8 +942,9 @@ impl TokenManager {
 
     /// 重新加载指定账号（用于配额更新后的实时同步）
     pub async fn reload_account(&self, account_id: &str) -> Result<(), String> {
+        let _reload = self.account_reload_lock.lock().await;
         let path = self
-            .data_dir
+            .resolved_data_dir()
             .join("accounts")
             .join(format!("{}.json", account_id));
         if !path.exists() {
@@ -1015,7 +1026,11 @@ impl TokenManager {
 
     /// 从内存中彻底移除指定账号及其关联数据 (Issue #1477)
     pub fn remove_account(&self, account_id: &str) {
-        // ... (省略原有逻辑)
+        self.evict_account(account_id);
+        self.sync_image_scheduler_accounts();
+    }
+
+    fn evict_account(&self, account_id: &str) {
         if self.tokens.remove(account_id).is_some() {
             tracing::info!("[Proxy] Removed account {} from memory cache", account_id);
         }
@@ -1036,7 +1051,6 @@ impl TokenManager {
                 );
             }
         }
-        self.sync_image_scheduler_accounts();
     }
 
     /// 根据账号 ID 获取完整的 ProxyToken 对象 (v4.1.29)
@@ -5792,6 +5806,10 @@ impl TokenManager {
         if session_id.is_empty() || account_id.is_empty() {
             return;
         }
+        // Keep the entry pinned until the binding is written so deletion can clear it.
+        let Some(_token) = self.tokens.get(account_id) else {
+            return;
+        };
         self.session_accounts
             .insert(session_id.to_string(), account_id.to_string());
     }
@@ -8328,13 +8346,14 @@ mod tests {
         let _dir = crate::proxy::monitor::prompt_log_tests::TestDataDir::new();
         let data_dir = crate::modules::account::get_data_dir().unwrap();
         let manager = TokenManager::new(data_dir.clone());
+        let accounts_dir = data_dir.join("accounts");
+        std::fs::create_dir_all(&accounts_dir).unwrap();
         for (id, priority) in [("high", 1), ("low", 100)] {
             let mut account = weekly_quota_account(chrono::Utc::now().timestamp());
             account["id"] = serde_json::json!(id);
             account["email"] = serde_json::json!(format!("{id}@test.invalid"));
             account["priority"] = serde_json::json!(priority);
-            let account: crate::models::Account = serde_json::from_value(account).unwrap();
-            crate::modules::account::save_account(&account).unwrap();
+            std::fs::write(accounts_dir.join(format!("{id}.json")), account.to_string()).unwrap();
             manager.reload_account(id).await.unwrap();
         }
         assert_eq!(select(&manager, "claude", Some("existing")).await, "high");
@@ -9111,6 +9130,10 @@ mod tests {
         let session_id = "test-session-123";
         let acc1 = "acc_failing";
         let acc2 = "acc_healthy";
+        for account_id in [acc1, acc2] {
+            let token = create_test_token(account_id, None, 1.0, None, Some(100));
+            manager.tokens.insert(account_id.to_string(), token);
+        }
 
         // 初始绑定到 acc1
         manager.commit_session(session_id, acc1);
@@ -9139,7 +9162,9 @@ mod tests {
         assert!(manager.session_accounts.get(session_id).is_none());
 
         // 故障转移到 acc2 成功后 commit
+        manager.remove_account(acc1);
         manager.commit_session(session_id, acc2);
+        manager.commit_session(session_id, acc1);
         assert_eq!(
             manager.session_accounts.get(session_id).unwrap().as_str(),
             acc2

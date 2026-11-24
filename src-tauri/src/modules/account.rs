@@ -887,6 +887,79 @@ mod tests {
 
         std::env::remove_var("ABV_DATA_DIR");
     }
+
+    #[tokio::test]
+    async fn deleted_account_cannot_return_after_a_quota_refresh() {
+        const MODEL: &str = "gemini-3-flash";
+        const SESSION: &str = "fixture-conversation";
+
+        for (bulk, replacement_email) in [(false, "new@example.test"), (true, "old@example.test")] {
+            let _dir = crate::proxy::monitor::prompt_log_tests::TestDataDir::new();
+            let manager = crate::proxy::TokenManager::new(get_data_dir().unwrap());
+            let add = |email: &str, credential: &str| {
+                let account = upsert_account(
+                    email.into(),
+                    None,
+                    TokenData::new(
+                        credential.into(),
+                        format!("fixture-refresh-{credential}"),
+                        3600,
+                        Some(email.into()),
+                        Some("fixture-project".into()),
+                        None,
+                        false,
+                        None,
+                    ),
+                )
+                .unwrap();
+                let mut quota = QuotaData::new();
+                quota.add_model(
+                    serde_json::from_value(serde_json::json!({
+                        "name": MODEL, "percentage": 100, "reset_time": ""
+                    }))
+                    .unwrap(),
+                );
+                update_account_quota(&account.id, quota).unwrap();
+                account
+            };
+
+            let mut old = add("old@example.test", "fixture-old");
+            old.token.access_token = "fixture-refreshed".into();
+            save_quota_credentials(&old).unwrap();
+            manager.load_accounts().await.unwrap();
+            manager.set_preferred_account(Some(old.id.clone())).await;
+            manager.commit_session(SESSION, &old.id);
+            let (access_token, _, _, account_id, _) = manager
+                .get_token("gemini", false, Some(SESSION), MODEL)
+                .await
+                .unwrap();
+            assert_eq!(account_id, old.id);
+            assert_eq!(access_token, "fixture-refreshed");
+
+            if bulk {
+                delete_accounts(std::slice::from_ref(&old.id)).unwrap();
+            } else {
+                delete_account(&old.id).unwrap();
+            }
+            let replacement = add(replacement_email, "fixture-new");
+            assert_ne!(replacement.id, old.id);
+
+            // The pending refresh still holds the account and its grant from before deletion.
+            old.token.access_token = "fixture-late-refresh".into();
+            assert!(save_quota_credentials(&old).is_err());
+            assert!(save_account(&old).is_err());
+            assert!(load_account(&old.id).is_err());
+            assert_eq!(manager.load_accounts().await.unwrap(), 1);
+            assert!(manager.get_preferred_account().await.is_none());
+
+            let (access_token, _, _, account_id, _) = manager
+                .get_token("gemini", false, Some(SESSION), MODEL)
+                .await
+                .unwrap();
+            assert_eq!(account_id, replacement.id);
+            assert_eq!(access_token, "fixture-new");
+        }
+    }
 }
 
 /// Global account write lock to prevent corruption during concurrent operations
@@ -1529,7 +1602,7 @@ fn load_account_at_path(account_path: &PathBuf) -> Result<Account, String> {
                         "Self-healing account JSON at {:?}: recovered valid account data from trailing characters, saving clean file",
                         account_path
                     ));
-                    let _ = save_account_at_path(account_path, &account);
+                    let _ = save_account_at_path(account_path, &account, false);
                     return Ok(account);
                 }
             }
@@ -1546,7 +1619,7 @@ fn load_account_at_path(account_path: &PathBuf) -> Result<Account, String> {
                 "Self-healing subscription tier for account {} ({:?} -> {:?})",
                 account.email, original_tier, quota.subscription_tier
             ));
-            let _ = save_account_at_path(account_path, &account);
+            let _ = save_account_at_path(account_path, &account, false);
         }
     }
 
@@ -1640,9 +1713,18 @@ pub fn load_account(account_id: &str) -> Result<Account, String> {
 }
 
 /// Save account data at specific file path (thread-safe and atomic)
-fn save_account_at_path(account_path: &PathBuf, account: &Account) -> Result<(), String> {
-    let _lock = get_account_lock(&account.id);
-    let _guard = _lock.lock().unwrap();
+fn save_account_at_path(
+    account_path: &Path,
+    account: &Account,
+    create_if_missing: bool,
+) -> Result<(), String> {
+    let lock = get_account_lock(&account.id);
+    let _guard = lock.lock().unwrap();
+
+    // A refresh or JSON repair may finish after the account is deleted.
+    if !create_if_missing && !account_path.try_exists().map_err(|e| e.to_string())? {
+        return Err(format!("Account ID not found: {}", account.id));
+    }
 
     let content = serde_json::to_string_pretty(account)
         .map_err(|e| format!("failed_to_serialize_account_data: {}", e))?;
@@ -1685,11 +1767,16 @@ fn clean_duplicate_account_files(accounts_dir: &Path, active_id: &str, email: &s
     }
 }
 
-/// Save account data (thread-safe and atomic)
+/// Update an existing account file.
 pub fn save_account(account: &Account) -> Result<(), String> {
+    let account_path = get_accounts_dir()?.join(format!("{}.json", account.id));
+    save_account_at_path(&account_path, account, false)
+}
+
+fn save_imported_account(account: &Account) -> Result<(), String> {
     let accounts_dir = get_accounts_dir()?;
     let account_path = accounts_dir.join(format!("{}.json", account.id));
-    save_account_at_path(&account_path, account)?;
+    save_account_at_path(&account_path, account, true)?;
     clean_duplicate_account_files(&accounts_dir, &account.id, &account.email);
     Ok(())
 }
@@ -1755,21 +1842,18 @@ pub async fn auto_fetch_account_project_id(account_id: &str) -> Result<String, S
 /// List all accounts
 pub fn list_accounts() -> Result<Vec<Account>, String> {
     crate::modules::logger::log_info("Listing accounts...");
-    let mut index = load_account_index()?;
+    let index = load_account_index()?;
     let mut accounts = Vec::new();
-    let mut index_dirty = false;
+    let mut status_drift = std::collections::HashSet::new();
 
-    for summary in &mut index.accounts {
+    for summary in index.accounts {
         match load_account(&summary.id) {
             Ok(account) => {
                 // 实体文件是账号状态的权威来源。若索引中的停用状态与实体文件发生漂移，以实体文件为准并同步修正索引
-                if summary.disabled != account.disabled {
-                    summary.disabled = account.disabled;
-                    index_dirty = true;
-                }
-                if summary.proxy_disabled != account.proxy_disabled {
-                    summary.proxy_disabled = account.proxy_disabled;
-                    index_dirty = true;
+                if summary.disabled != account.disabled
+                    || summary.proxy_disabled != account.proxy_disabled
+                {
+                    status_drift.insert(summary.id);
                 }
                 accounts.push(account);
             }
@@ -1785,8 +1869,21 @@ pub fn list_accounts() -> Result<Vec<Account>, String> {
         }
     }
 
-    if index_dirty {
-        let _ = save_account_index(&index);
+    if !status_drift.is_empty() {
+        // Keep additions and deletions that committed while the files were being read.
+        if let Ok(_lock) = lock_account_file_updates() {
+            if let Ok(mut current_index) = load_account_index() {
+                for summary in &mut current_index.accounts {
+                    if status_drift.contains(&summary.id) {
+                        if let Ok(account) = load_account(&summary.id) {
+                            summary.disabled = account.disabled;
+                            summary.proxy_disabled = account.proxy_disabled;
+                        }
+                    }
+                }
+                let _ = save_account_index(&current_index);
+            }
+        }
     }
 
     if let Err(error) = crate::modules::token_stats::populate_weekly_usage(&mut accounts) {
@@ -1814,6 +1911,19 @@ pub fn add_account(
     upsert_account(email, name, token)
 }
 
+fn set_account_credentials(account: &mut Account, name: Option<String>, token: TokenData) {
+    let credentials_changed = token.refresh_token != account.token.refresh_token
+        || token.access_token != account.token.access_token;
+    account.token = token;
+    account.name = name;
+    if account.disabled && credentials_changed {
+        account.disabled = false;
+        account.disabled_reason = None;
+        account.disabled_at = None;
+    }
+    account.update_last_used();
+}
+
 /// Add or update account (严格幂等主入口)
 pub fn upsert_account(
     email: String,
@@ -1839,20 +1949,8 @@ pub fn upsert_account(
         // 原地复用现有账号 ID，覆盖并更新，绝不生成新的文件！
         match load_account(&account_id) {
             Ok(mut account) => {
-                let old_access_token = account.token.access_token.clone();
-                let old_refresh_token = account.token.refresh_token.clone();
-                account.token = token;
-                account.name = name.clone();
-                if account.disabled
-                    && (account.token.refresh_token != old_refresh_token
-                        || account.token.access_token != old_access_token)
-                {
-                    account.disabled = false;
-                    account.disabled_reason = None;
-                    account.disabled_at = None;
-                }
-                account.update_last_used();
-                save_account(&account)?;
+                set_account_credentials(&mut account, name.clone(), token);
+                save_imported_account(&account)?;
 
                 // 同步索引
                 if let Some(idx_summary) = index.accounts.iter_mut().find(|s| s.id == account_id) {
@@ -1870,7 +1968,7 @@ pub fn upsert_account(
                 ));
                 let mut account = Account::new(account_id.clone(), email.clone(), token);
                 account.name = name.clone();
-                save_account(&account)?;
+                save_imported_account(&account)?;
 
                 if let Some(idx_summary) = index.accounts.iter_mut().find(|s| s.id == account_id) {
                     idx_summary.name = name;
@@ -1887,7 +1985,7 @@ pub fn upsert_account(
     let account_id = Uuid::new_v4().to_string();
     let mut account = Account::new(account_id.clone(), email.clone(), token);
     account.name = name.clone();
-    save_account(&account)?;
+    save_imported_account(&account)?;
 
     index.accounts.push(AccountSummary {
         id: account.id.clone(),
@@ -1939,16 +2037,19 @@ pub fn delete_account(account_id: &str) -> Result<(), String> {
         save_account_index(&index)?;
     }
 
-    // 无论索引中是否存在，均尝试删除物理凭据文件（兜底清理孤儿文件）；删除失败通过 ? 向上抛错
-    if file_existed {
-        fs::remove_file(&account_path)
-            .map_err(|e| format!("failed_to_delete_account_file: {}", e))?;
-    }
-
-    // [FIX #1477] Trigger TokenManager cache cleanup signal
+    let result = delete_account_file(&account_path, account_id);
     crate::proxy::server::trigger_account_delete(account_id);
+    result
+}
 
-    Ok(())
+fn delete_account_file(path: &Path, account_id: &str) -> Result<(), String> {
+    let lock = get_account_lock(account_id);
+    let _guard = lock.lock().unwrap();
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("failed_to_delete_account_file: {}", error)),
+    }
 }
 
 /// Batch delete accounts (atomic index operation)
@@ -1968,15 +2069,6 @@ pub fn delete_accounts(account_ids: &[String]) -> Result<(), String> {
         if index.current_account_id.as_deref() == Some(account_id) {
             index.current_account_id = None;
         }
-
-        // Delete account file
-        let account_path = accounts_dir.join(format!("{}.json", account_id));
-        if account_path.exists() {
-            let _ = fs::remove_file(&account_path);
-        }
-
-        // [FIX #1477] Trigger TokenManager cache cleanup signal
-        crate::proxy::server::trigger_account_delete(account_id);
     }
 
     // If current account is empty, use first one as default
@@ -1984,7 +2076,20 @@ pub fn delete_accounts(account_ids: &[String]) -> Result<(), String> {
         index.current_account_id = index.accounts.first().map(|s| s.id.clone());
     }
 
-    save_account_index(&index)
+    save_account_index(&index)?;
+
+    for account_id in account_ids {
+        let account_path = accounts_dir.join(format!("{}.json", account_id));
+        if let Err(error) = delete_account_file(&account_path, account_id) {
+            tracing::warn!(
+                "Failed to remove account file for {}: {}",
+                account_id,
+                error
+            );
+        }
+        crate::proxy::server::trigger_account_delete(account_id);
+    }
+    Ok(())
 }
 
 /// Reorder account list
@@ -3182,6 +3287,26 @@ pub fn export_accounts() -> Result<Vec<(String, String)>, String> {
     Ok(exports)
 }
 
+fn save_quota_credentials(account: &Account) -> Result<(), String> {
+    let _lock = lock_account_file_updates()?;
+    let mut index = load_account_index()?;
+    let summary = index
+        .accounts
+        .iter_mut()
+        .find(|summary| summary.id == account.id)
+        .ok_or_else(|| format!("Account ID not found: {}", account.id))?;
+    let mut current = load_account(&account.id)?;
+    if current.token.refresh_token != account.token.refresh_token {
+        return Err(format!("Account credentials changed: {}", account.id));
+    }
+
+    set_account_credentials(&mut current, account.name.clone(), account.token.clone());
+    save_account(&current)?;
+    summary.name = current.name;
+    summary.disabled = current.disabled;
+    save_account_index(&index)
+}
+
 /// Quota query with retry (moved from commands to modules for reuse)
 pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppResult<QuotaData> {
     use crate::error::AppError;
@@ -3222,8 +3347,8 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
             account.name.clone()
         };
 
-        account.name = name.clone();
-        upsert_account(account.email.clone(), name, token.clone()).map_err(AppError::Account)?;
+        account.name = name;
+        save_quota_credentials(account).map_err(AppError::Account)?;
     }
 
     // 0. Supplement display name (if missing or upper step failed)
@@ -3240,11 +3365,9 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                     "Successfully fetched display name: {:?}",
                     display_name
                 ));
-                account.name = display_name.clone();
+                account.name = display_name;
                 // Save immediately
-                if let Err(e) =
-                    upsert_account(account.email.clone(), display_name, account.token.clone())
-                {
+                if let Err(e) = save_quota_credentials(account) {
                     modules::logger::log_warn(&format!("Failed to save display name: {}", e));
                 }
             }
@@ -3272,11 +3395,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                 account.email
             ));
             account.token.project_id = project_id.clone();
-            if let Err(e) = upsert_account(
-                account.email.clone(),
-                account.name.clone(),
-                account.token.clone(),
-            ) {
+            if let Err(e) = save_quota_credentials(account) {
                 modules::logger::log_warn(&format!("Failed to sync project_id: {}", e));
             }
         }
@@ -3357,9 +3476,8 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                 };
 
                 account.token = new_token.clone();
-                account.name = name.clone();
-                upsert_account(account.email.clone(), name, new_token.clone())
-                    .map_err(AppError::Account)?;
+                account.name = name;
+                save_quota_credentials(account).map_err(AppError::Account)?;
 
                 // Retry query (pass cached project_id if available)
                 let retry_result: crate::error::AppResult<(QuotaData, Option<String>)> =
@@ -3379,11 +3497,7 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
                             account.email
                         ));
                         account.token.project_id = project_id.clone();
-                        let _ = upsert_account(
-                            account.email.clone(),
-                            account.name.clone(),
-                            account.token.clone(),
-                        );
+                        let _ = save_quota_credentials(account);
                     }
                 }
 
@@ -3560,6 +3674,7 @@ pub async fn refresh_all_quotas_logic() -> Result<RefreshStats, String> {
 
     // [FIX #3726] 批量刷新全部执行完毕后，统一一次性更新 accounts.json 大索引！(I/O 骤减 99.8%)
     if !updated_accounts.is_empty() {
+        let _lock = lock_account_file_updates()?;
         if let Ok(mut index) = load_account_index() {
             let mut dirty = false;
             for acc in updated_accounts {
@@ -3889,7 +4004,7 @@ pub async fn batch_import_accounts_logic(
                     };
 
                     // 6. 单账号独立写入 accounts/{uuid}.json（零全局锁竞争，同时自动清理同邮箱孤儿文件）
-                    save_account(&account)?;
+                    save_imported_account(&account)?;
 
                     let summary = crate::models::AccountSummary {
                         id: account.id.clone(),
