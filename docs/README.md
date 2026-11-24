@@ -8,6 +8,7 @@ Start with [AGENTS.md](../AGENTS.md). See [DESIGN.md](../DESIGN.md) for UI, [TES
 
 ## Proxy
 - [冷启动模型档位未聚合](../error/model-catalog-cold-start.md) — 模型目录、分组缓存与路由排查。
+- [Argon 共享配额](../error/argon-shared-quota.md) — 排查官方可选但代理目录缺项。
 - [`docs/proxy/auth.md`](proxy/auth.md) — proxy authorization modes, expected client behavior, and implementation pointers.
 - [`docs/proxy/accounts.md`](proxy/accounts.md) — account lifecycle in the proxy pool (including auto-disable on `invalid_grant`) and UI behavior.
 - [网关残留已删除账号](../error/proxy-deleted-account.md) — 排查配额刷新写回、账号池重载和会话绑定。

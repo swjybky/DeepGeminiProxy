@@ -1442,145 +1442,6 @@ impl TokenManager {
             }
         }
 
-        // [NEW] 检查 quota_groups 是否存在 Argon 专属分组，为该账号注入 Argon 授权、配额与限额
-        let quota_val = account.get("quota");
-        let groups_val = quota_val
-            .and_then(|q| q.get("quota_groups").or_else(|| q.get("quotaGroups")))
-            .and_then(|g| g.as_array());
-
-        if let Some(groups) = groups_val {
-            let argon_bucket = groups.iter().find_map(|g| {
-                let name = g
-                    .get("display_name")
-                    .or_else(|| g.get("displayName"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                let buckets = g.get("buckets").and_then(|b| b.as_array())?;
-                if name.contains("argon") {
-                    return buckets.first();
-                }
-                buckets.iter().find(|b| {
-                    let b_id = b
-                        .get("bucket_id")
-                        .or_else(|| b.get("bucketId"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    let b_name = b
-                        .get("display_name")
-                        .or_else(|| b.get("displayName"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    b_id.contains("argon") || b_name.contains("argon")
-                })
-            });
-
-            let is_ultra = subscription_tier
-                .as_deref()
-                .map(|s| s.to_uppercase() == "ULTRA")
-                .unwrap_or(false);
-
-            if let Some(bucket) = argon_bucket {
-                let frac = bucket
-                    .get("remaining_fraction")
-                    .or_else(|| bucket.get("remainingFraction"))
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                let pct = (frac * 100.0) as i32;
-                model_quotas.insert("gemini-4-argon".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-high".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-medium".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-low".to_string(), pct);
-
-                available_models.insert("gemini-4-argon".to_string());
-                available_models.insert("gemini-4-argon-high".to_string());
-                available_models.insert("gemini-4-argon-medium".to_string());
-                available_models.insert("gemini-4-argon-low".to_string());
-
-                model_limits.insert("gemini-4-argon".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-high".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-medium".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-low".to_string(), 65536);
-            } else if is_ultra {
-                // Ultra 账号在官方架构下未拆分专属 Argon 分组，其 Argon 额度共享 Gemini 通用配额池
-                let gemini_bucket = groups.iter().find_map(|g| {
-                    let name = g
-                        .get("display_name")
-                        .or_else(|| g.get("displayName"))
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    if !name.contains("claude") && !name.contains("gpt") && !name.contains("3p") {
-                        g.get("buckets")
-                            .and_then(|b| b.as_array())
-                            .and_then(|bs| bs.first())
-                    } else {
-                        None
-                    }
-                });
-                let frac = gemini_bucket
-                    .and_then(|b| {
-                        b.get("remaining_fraction")
-                            .or_else(|| b.get("remainingFraction"))
-                    })
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(1.0);
-                let pct = (frac * 100.0) as i32;
-                model_quotas.insert("gemini-4-argon".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-high".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-medium".to_string(), pct);
-                model_quotas.insert("gemini-4-argon-low".to_string(), pct);
-
-                available_models.insert("gemini-4-argon".to_string());
-                available_models.insert("gemini-4-argon-high".to_string());
-                available_models.insert("gemini-4-argon-medium".to_string());
-                available_models.insert("gemini-4-argon-low".to_string());
-
-                model_limits.insert("gemini-4-argon".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-high".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-medium".to_string(), 65536);
-                model_limits.insert("gemini-4-argon-low".to_string(), 65536);
-            } else {
-                // 配额组中明确不存在 Argon 分组且非 Ultra 账号，防呆清理（防止历史残存虚假配额注入调度器）
-                model_quotas.remove("gemini-4-argon");
-                model_quotas.remove("gemini-4-argon-high");
-                model_quotas.remove("gemini-4-argon-medium");
-                model_quotas.remove("gemini-4-argon-low");
-
-                available_models.remove("gemini-4-argon");
-                available_models.remove("gemini-4-argon-high");
-                available_models.remove("gemini-4-argon-medium");
-                available_models.remove("gemini-4-argon-low");
-
-                model_limits.remove("gemini-4-argon");
-                model_limits.remove("gemini-4-argon-high");
-                model_limits.remove("gemini-4-argon-medium");
-                model_limits.remove("gemini-4-argon-low");
-            }
-        }
-
-        // 若 model_quotas 中已有 gemini-4-argon（例如通过 models 列表或上游配额注入），确保同步到 available_models 与 limits
-        if model_quotas.contains_key("gemini-4-argon") {
-            available_models.insert("gemini-4-argon".to_string());
-            available_models.insert("gemini-4-argon-high".to_string());
-            available_models.insert("gemini-4-argon-medium".to_string());
-            available_models.insert("gemini-4-argon-low".to_string());
-            model_limits
-                .entry("gemini-4-argon".to_string())
-                .or_insert(65536);
-            model_limits
-                .entry("gemini-4-argon-high".to_string())
-                .or_insert(65536);
-            model_limits
-                .entry("gemini-4-argon-medium".to_string())
-                .or_insert(65536);
-            model_limits
-                .entry("gemini-4-argon-low".to_string())
-                .or_insert(65536);
-        }
-
         if let Some(live_limits) = account
             .get("live_limited_models")
             .and_then(|value| value.as_object())
@@ -1943,61 +1804,6 @@ impl TokenManager {
                         result.insert(normalized);
                     }
                 }
-            }
-        }
-        // [NEW] 检查 quota_groups 是否包含 argon 分组（Ultra 账号自动授权）
-        if let Some(groups) = account
-            .get("quota")
-            .and_then(|q| q.get("quota_groups").or_else(|| q.get("quotaGroups")))
-            .and_then(|g| g.as_array())
-        {
-            let is_ultra = account
-                .get("quota")
-                .and_then(|q| {
-                    q.get("subscription_tier")
-                        .or_else(|| q.get("subscriptionTier"))
-                })
-                .and_then(|t| t.as_str())
-                .map(|s| s.to_uppercase() == "ULTRA")
-                .unwrap_or(false);
-
-            let has_argon = groups.iter().any(|g| {
-                let name = g
-                    .get("display_name")
-                    .or_else(|| g.get("displayName"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_lowercase();
-                let buckets = g.get("buckets").and_then(|b| b.as_array());
-                name.contains("argon")
-                    || buckets.map_or(false, |bs| {
-                        bs.iter().any(|b| {
-                            let b_id = b
-                                .get("bucket_id")
-                                .or_else(|| b.get("bucketId"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            let b_name = b
-                                .get("display_name")
-                                .or_else(|| b.get("displayName"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("")
-                                .to_lowercase();
-                            b_id.contains("argon") || b_name.contains("argon")
-                        })
-                    })
-            });
-            if has_argon || is_ultra {
-                result.insert("gemini-4-argon".to_string());
-                result.insert("gemini-4-argon-high".to_string());
-                result.insert("gemini-4-argon-medium".to_string());
-                result.insert("gemini-4-argon-low".to_string());
-            } else {
-                result.remove("gemini-4-argon");
-                result.remove("gemini-4-argon-high");
-                result.remove("gemini-4-argon-medium");
-                result.remove("gemini-4-argon-low");
             }
         }
         Some(result)
@@ -4409,27 +4215,18 @@ impl TokenManager {
                     return false;
                 }
 
-                // Argon 判定（数据驱动：看账号是否含有独立 Argon 桶，有就走独立桶，没有就落入通用大池）
+                // Argon authorization is model-specific. The cached percentage was
+                // resolved from that account's dedicated or shared Gemini windows.
                 if is_argon {
-                    // 检查该账号是否拥有 Argon 能力（available_models 中包含 argon，或 model_quotas 包含 argon）
-                    let has_argon_cap = token.available_models.iter().any(|m| m.contains("argon"))
-                        || token.model_quotas.keys().any(|k| k.contains("argon"));
-                    if !has_argon_cap {
-                        // 无 Argon 权限的账号（如无 Argon 的 Pro 账号）坚决排除，绝不连累它，也绝不派发 Argon
-                        return false;
-                    }
-                    // 有 Argon 能力的账号（有独立桶的 Pro，或 Ultra 共享通用大池）：
-                    // 无论是从独立桶注入的配额还是 Ultra 共享大池注入的配额，只要其 Argon 或通用大池配额 > 0 即通过
-                    let has_argon_positive = token
-                        .model_quotas
-                        .iter()
-                        .any(|(k, v)| *v > 0 && k.contains("argon"));
-                    if has_argon_positive {
-                        return true;
-                    }
-                    return !self
-                        .rate_limit_tracker
-                        .is_rate_limited(&token.account_id, Some(model));
+                    return Self::token_supports_advanced_model(token, model)
+                        && token
+                            .model_quotas
+                            .get(&model_lower)
+                            .or_else(|| token.model_quotas.get(&normalized))
+                            .is_none_or(|quota| *quota > 0)
+                        && !self
+                            .rate_limit_tracker
+                            .is_rate_limited(&token.account_id, Some(model));
                 }
 
                 // 除 3P 和独立 Argon 外的所有模型：一律直接落入 Gemini 通用配额大池！
@@ -4824,8 +4621,20 @@ impl TokenManager {
                 if let Some(mut token) = self.tokens.get_mut(&account_id) {
                     if !quota_data.models.is_empty() {
                         token.available_models.clear();
+                        // Rebuild the Argon entries from the fresh catalog, including decreases.
+                        let is_argon = |name: &str| name.to_ascii_lowercase().contains("argon");
+                        token.model_quotas.retain(|name, _| !is_argon(name));
+                        token.model_limits.retain(|name, _| !is_argon(name));
                     }
                     for m in &quota_data.models {
+                        if m.name.contains("argon") {
+                            if let Some(limit) = m
+                                .max_output_tokens
+                                .and_then(|limit| u64::try_from(limit).ok())
+                            {
+                                token.model_limits.insert(m.name.clone(), limit);
+                            }
+                        }
                         let norm_name =
                             crate::proxy::common::model_mapping::normalize_to_standard_id(&m.name)
                                 .unwrap_or_else(|| m.name.clone());
@@ -4852,125 +4661,13 @@ impl TokenManager {
                         }
                         token.available_models.insert(m_lower);
                     }
-                    // [NEW] 同步 Argon 配额组能力
-                    let argon_bucket = quota_data.quota_groups.as_ref().and_then(|groups| {
-                        groups.iter().find_map(|g| {
-                            let name = g.display_name.to_lowercase();
-                            if name.contains("argon") {
-                                return g.buckets.first();
-                            }
-                            g.buckets.iter().find(|b| {
-                                let bid = b.bucket_id.to_lowercase();
-                                let bname = b.display_name.as_deref().unwrap_or("").to_lowercase();
-                                bid.contains("argon") || bname.contains("argon")
-                            })
-                        })
-                    });
-                    let is_ultra = token
-                        .subscription_tier
-                        .as_deref()
-                        .map(|s| s.to_uppercase() == "ULTRA")
-                        .unwrap_or(false);
+                }
 
-                    if let Some(bucket) = argon_bucket {
-                        let pct = (bucket.remaining_fraction * 100.0) as i32;
-                        token.model_quotas.insert("gemini-4-argon".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-high".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-medium".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-low".to_string(), pct);
-                        token.available_models.insert("gemini-4-argon".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-high".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-medium".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-low".to_string());
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-high".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-medium".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-low".to_string(), 65536);
-                    } else if is_ultra {
-                        // Ultra 账号在官方架构下未拆分专属 Argon 分组，其 Argon 额度共享 Gemini 通用配额池
-                        let gemini_bucket = quota_data.quota_groups.as_ref().and_then(|groups| {
-                            groups.iter().find_map(|g| {
-                                let name = g.display_name.to_lowercase();
-                                if !name.contains("claude")
-                                    && !name.contains("gpt")
-                                    && !name.contains("3p")
-                                {
-                                    g.buckets.first()
-                                } else {
-                                    None
-                                }
-                            })
-                        });
-                        let pct = gemini_bucket
-                            .map(|b| (b.remaining_fraction * 100.0) as i32)
-                            .unwrap_or(100);
-                        token.model_quotas.insert("gemini-4-argon".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-high".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-medium".to_string(), pct);
-                        token
-                            .model_quotas
-                            .insert("gemini-4-argon-low".to_string(), pct);
-                        token.available_models.insert("gemini-4-argon".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-high".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-medium".to_string());
-                        token
-                            .available_models
-                            .insert("gemini-4-argon-low".to_string());
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-high".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-medium".to_string(), 65536);
-                        token
-                            .model_limits
-                            .insert("gemini-4-argon-low".to_string(), 65536);
-                    } else {
-                        // 若刷新后无 Argon 专属分组且非 Ultra，清理该账号在内存中的 Argon 缓存
-                        token.model_quotas.remove("gemini-4-argon");
-                        token.model_quotas.remove("gemini-4-argon-high");
-                        token.model_quotas.remove("gemini-4-argon-medium");
-                        token.model_quotas.remove("gemini-4-argon-low");
-                        token.available_models.remove("gemini-4-argon");
-                        token.available_models.remove("gemini-4-argon-high");
-                        token.available_models.remove("gemini-4-argon-medium");
-                        token.available_models.remove("gemini-4-argon-low");
-                        token.model_limits.remove("gemini-4-argon");
-                        token.model_limits.remove("gemini-4-argon-high");
-                        token.model_limits.remove("gemini-4-argon-medium");
-                        token.model_limits.remove("gemini-4-argon-low");
-                    }
+                if quota_data.models.iter().any(|m| m.name.contains("argon")) {
+                    self.sync_zero_quota_circuit_breaker(
+                        &account_id,
+                        &serde_json::json!({ "quota": &quota_data }),
+                    );
                 }
 
                 // 3. 从最新配额中提取匹配模型的 reset_time
@@ -5008,64 +4705,12 @@ impl TokenManager {
                         crate::proxy::common::model_mapping::normalize_to_standard_id(target)
                             .unwrap_or_else(|| target.to_string());
 
-                    // 精准查找当前报错的模型所属分组，并检查**该分组内任意桶**是否低于 1.5%。
-                    // 四类桶（Argon 独立桶 / Ultra 共享大桶 / 普通 Gemini 大桶 / 3P 桶）都可能只耗尽
-                    // 5h 或 weekly 其中一个窗口，只盯 weekly 会漏判（如 5h=0.4% 反复 300s 重试）。
-                    let is_ultra = self
-                        .tokens
-                        .get(&account_id)
-                        .map(|t| {
-                            t.subscription_tier
-                                .as_deref()
-                                .map(|s| s.to_uppercase() == "ULTRA")
-                                .unwrap_or(false)
-                        })
-                        .unwrap_or(false);
-                    let target_is_argon = target.contains("argon");
-
-                    is_weekly_depleted = quota_data.quota_groups.as_ref().map_or(false, |groups| {
-                        let is_gemini_group = |g: &crate::models::quota::QuotaGroup| {
-                            let n = g.display_name.to_lowercase();
-                            !n.contains("claude")
-                                && !n.contains("gpt")
-                                && !n.contains("3p")
-                                && !n.contains("argon")
-                        };
-                        let is_argon_group = |g: &crate::models::quota::QuotaGroup| {
-                            let n = g.display_name.to_lowercase();
-                            n.contains("argon")
-                                || g.buckets.iter().any(|b| {
-                                    let bid = b.bucket_id.to_lowercase();
-                                    let bname =
-                                        b.display_name.as_deref().unwrap_or("").to_lowercase();
-                                    bid.contains("argon") || bname.contains("argon")
-                                })
-                        };
-
-                        groups.iter().any(|g| {
-                            let g_name = g.display_name.to_lowercase();
-                            let is_match = if target.contains("claude") || target.contains("gpt") {
-                                g_name.contains("claude")
-                                    || g_name.contains("gpt")
-                                    || g_name.contains("3p")
-                            } else if target_is_argon {
-                                // 有专属 Argon 分组时只看它；Ultra 账号未拆分专属分组时
-                                // Argon 额度共享 Gemini 通用池，必须回退到通用分组
-                                if groups.iter().any(is_argon_group) {
-                                    is_argon_group(g)
-                                } else {
-                                    is_ultra && is_gemini_group(g)
-                                }
-                            } else {
-                                is_gemini_group(g)
-                            };
-                            if !is_match {
-                                return false;
-                            }
-                            // 分组内任意窗口（5h / weekly / 专属桶）低于 1.5% 即视为事实耗尽
-                            g.buckets.iter().any(|b| b.remaining_fraction <= 0.015)
-                        })
-                    });
+                    let groups = quota_data.quota_groups.as_deref().unwrap_or_default();
+                    let matched_groups =
+                        || crate::models::quota::quota_groups_for_model(groups, target);
+                    is_weekly_depleted = matched_groups()
+                        .flat_map(|group| &group.buckets)
+                        .any(|bucket| bucket.remaining_fraction <= 0.015);
 
                     quota_data
                         .models
@@ -5096,72 +4741,32 @@ impl TokenManager {
                             if !is_weekly_depleted {
                                 return None;
                             }
-                            quota_data.quota_groups.as_ref().and_then(|groups| {
-                                let is_gemini_group = |g: &crate::models::quota::QuotaGroup| {
-                                    let n = g.display_name.to_lowercase();
-                                    !n.contains("claude")
-                                        && !n.contains("gpt")
-                                        && !n.contains("3p")
-                                        && !n.contains("argon")
-                                };
-                                let is_argon_group = |g: &crate::models::quota::QuotaGroup| {
-                                    let n = g.display_name.to_lowercase();
-                                    n.contains("argon")
-                                        || g.buckets.iter().any(|b| {
-                                            let bid = b.bucket_id.to_lowercase();
-                                            let bname = b
-                                                .display_name
-                                                .as_deref()
-                                                .unwrap_or("")
-                                                .to_lowercase();
-                                            bid.contains("argon") || bname.contains("argon")
-                                        })
-                                };
-
-                                groups
-                                    .iter()
-                                    .filter(|g| {
-                                        let g_name = g.display_name.to_lowercase();
-                                        if target.contains("claude") || target.contains("gpt") {
-                                            g_name.contains("claude")
-                                                || g_name.contains("gpt")
-                                                || g_name.contains("3p")
-                                        } else if target_is_argon {
-                                            if groups.iter().any(is_argon_group) {
-                                                is_argon_group(g)
-                                            } else {
-                                                is_ultra && is_gemini_group(g)
-                                            }
-                                        } else {
-                                            is_gemini_group(g)
-                                        }
-                                    })
-                                    // 【锁定源优先级：硬配额优先于滚动窗口】
-                                    // weekly 是硬配额，归零后只有到 reset 才恢复；若此时取
-                                    // 更早的 5h reset（例如 30 分钟后）就会造成「反复调度」：
-                                    // 5h 一恢复就去试，weekly 仍为 0，于是再 429 一次，
-                                    // 每次失败都会污染模型级锁定与失败计数。
-                                    // 因此：weekly 耗尽 → 锁 weekly reset；
-                                    //       仅 5h 耗尽（weekly 健康）→ 才锁 5h reset，
-                                    //       避免把一个几十分钟就能恢复的账号锁上一整天。
-                                    .flat_map(|g| g.buckets.iter())
-                                    .filter(|b| b.remaining_fraction <= 0.015)
-                                    .filter(|b| !b.reset_time.is_empty())
-                                    .min_by_key(|b| {
-                                        let win =
-                                            format!("{} {}", b.window, b.bucket_id).to_lowercase();
-                                        let is_weekly = win.contains("week")
-                                            || win.contains("7d")
-                                            || win.contains("wtu");
-                                        // weekly 排在最前（硬配额），其余按 reset 时间排序
-                                        if is_weekly {
-                                            (0u8, String::new())
-                                        } else {
-                                            (1u8, b.reset_time.clone())
-                                        }
-                                    })
-                                    .map(|b| b.reset_time.as_str())
-                            })
+                            matched_groups()
+                                // 【锁定源优先级：硬配额优先于滚动窗口】
+                                // weekly 是硬配额，归零后只有到 reset 才恢复；若此时取
+                                // 更早的 5h reset（例如 30 分钟后）就会造成「反复调度」：
+                                // 5h 一恢复就去试，weekly 仍为 0，于是再 429 一次，
+                                // 每次失败都会污染模型级锁定与失败计数。
+                                // 因此：weekly 耗尽 → 锁 weekly reset；
+                                //       仅 5h 耗尽（weekly 健康）→ 才锁 5h reset，
+                                //       避免把一个几十分钟就能恢复的账号锁上一整天。
+                                .flat_map(|g| g.buckets.iter())
+                                .filter(|b| b.remaining_fraction <= 0.015)
+                                .filter(|b| !b.reset_time.is_empty())
+                                .min_by_key(|b| {
+                                    let win =
+                                        format!("{} {}", b.window, b.bucket_id).to_lowercase();
+                                    let is_weekly = win.contains("week")
+                                        || win.contains("7d")
+                                        || win.contains("wtu");
+                                    // weekly 排在最前（硬配额），其余按 reset 时间排序
+                                    if is_weekly {
+                                        (0u8, String::new())
+                                    } else {
+                                        (1u8, b.reset_time.clone())
+                                    }
+                                })
+                                .map(|b| b.reset_time.as_str())
                         })
                 } else {
                     // 全账号级锁定：仅在所有模型配额均耗尽时才提取最早 reset_time
@@ -6386,23 +5991,63 @@ impl TokenManager {
             .unwrap_or(0)
             .saturating_mul(1000);
         if let Some(groups) = quota.get("quota_groups").and_then(|g| g.as_array()) {
+            let is_argon_group = |group: &serde_json::Value| {
+                let is_argon = |value: Option<&serde_json::Value>| {
+                    value
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|s| s.to_ascii_lowercase().contains("argon"))
+                };
+                is_argon(group.get("display_name"))
+                    || group
+                        .get("buckets")
+                        .and_then(|b| b.as_array())
+                        .is_some_and(|buckets| {
+                            buckets.iter().any(|b| {
+                                is_argon(b.get("bucket_id")) || is_argon(b.get("display_name"))
+                            })
+                        })
+            };
+            let dedicated_argon = groups.iter().any(is_argon_group);
+            if !dedicated_argon {
+                if let Some(shared_observed_at) = groups
+                    .iter()
+                    .filter_map(|group| group.get("buckets")?.as_array())
+                    .flatten()
+                    .filter(|bucket| {
+                        bucket
+                            .get("bucket_id")
+                            .and_then(|id| id.as_str())
+                            .is_some_and(|id| {
+                                id.eq_ignore_ascii_case("gemini-weekly")
+                                    || id.eq_ignore_ascii_case("gemini-5h")
+                            })
+                            && bucket
+                                .get("remaining_fraction")
+                                .and_then(|value| value.as_f64())
+                                .is_some()
+                    })
+                    .map(|bucket| {
+                        bucket
+                            .get("observed_at")
+                            .and_then(|at| at.as_i64())
+                            .unwrap_or(observed_at)
+                    })
+                    .max()
+                {
+                    self.rate_limit_tracker
+                        .retire_argon_quota_buckets(account_id, shared_observed_at);
+                }
+            }
             for group in groups {
-                let group_name = group
+                let group_name_lower = group
                     .get("display_name")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let group_name_lower = group_name.to_lowercase();
-                let is_argon_group = group_name_lower.contains("argon");
-                let is_claude_group = !is_argon_group
-                    && (group_name_lower.contains("claude")
-                        || group_name_lower.contains("gpt")
-                        || group_name_lower.contains("3p"));
-                let is_gemini_group = !is_argon_group
-                    && !is_claude_group
-                    && (group_name_lower.contains("gemini")
-                        || (!group_name_lower.contains("claude")
-                            && !group_name_lower.contains("gpt")
-                            && !group_name_lower.contains("3p")));
+                    .unwrap_or("")
+                    .to_lowercase();
+                let argon_group = is_argon_group(group);
+                let is_claude_group = group_name_lower.contains("claude")
+                    || group_name_lower.contains("gpt")
+                    || group_name_lower.contains("3p");
 
                 if let Some(buckets) = group.get("buckets").and_then(|b| b.as_array()) {
                     for bucket in buckets {
@@ -6437,12 +6082,10 @@ impl TokenManager {
                             None
                         };
                         let bucket_id_lower = bucket_id.to_lowercase();
-                        let is_argon_bucket = is_argon_group || bucket_id_lower.contains("argon");
+                        let is_argon_bucket = argon_group;
                         let third_party =
                             !is_argon_bucket && (is_claude_group || bucket_id_lower.contains("3p"));
-                        let gemini = !is_argon_bucket
-                            && !third_party
-                            && (is_gemini_group || bucket_id_lower.contains("gemini"));
+                        let gemini = !is_argon_bucket && !third_party;
 
                         let mut models: Vec<&str> = if is_argon_bucket {
                             vec![
@@ -6487,9 +6130,17 @@ impl TokenManager {
                             models.extend(
                                 available
                                     .iter()
+                                    .filter(|m| {
+                                        m.get("disabled").and_then(|v| v.as_bool()) != Some(true)
+                                    })
                                     .filter_map(|m| m.get("name")?.as_str())
                                     .filter(|name| {
                                         let n_lower = name.to_lowercase();
+                                        if n_lower.contains("-disabled")
+                                            || n_lower.ends_with("_disabled")
+                                        {
+                                            return false;
+                                        }
                                         if is_argon_bucket {
                                             n_lower.contains("argon")
                                         } else if third_party {
@@ -6499,7 +6150,7 @@ impl TokenManager {
                                         } else {
                                             gemini
                                                 && name.starts_with("gemini")
-                                                && !n_lower.contains("argon")
+                                                && (!dedicated_argon || !n_lower.contains("argon"))
                                         }
                                     }),
                             );
@@ -6598,7 +6249,10 @@ impl TokenManager {
             // 持久化文件里的原始 quota 模型 ID（官方 fetchAvailableModels 可用集合）
             if let Some(raw_models) = Self::get_available_models_from_json(&token.account_path) {
                 for model_id in raw_models {
-                    all_models.insert(model_id);
+                    // A fresh runtime catalog can withdraw Argon before the next disk refresh.
+                    if !model_id.contains("argon") || token.available_models.contains(&model_id) {
+                        all_models.insert(model_id);
+                    }
                 }
             }
         }

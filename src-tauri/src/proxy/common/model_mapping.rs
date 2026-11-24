@@ -1038,7 +1038,7 @@ pub fn normalize_to_standard_id(model_name: &str) -> Option<String> {
         return None;
     }
 
-    // 0. Gemini 4 Argon 系列（独立配额组与独立计费桶，所有档位变体如 high/medium/low/thinking 均归一化为基底 ID）
+    // 0. Gemini 4 Argon 档位共用模型键，用于保留 Argon 的授权与限流状态。
     if lower.contains("argon") {
         return Some("gemini-4-argon".to_string());
     }
@@ -1704,7 +1704,7 @@ mod tests {
 
     #[test]
     fn test_normalize_to_standard_id_argon_unified_pool() {
-        // Gemini 4 Argon 系列独立计费与熔断，统一归一化为 'gemini-4-argon' 标准桶
+        // Gemini 4 Argon 的各档位共用一个模型键。
         assert_eq!(
             normalize_to_standard_id("gemini-4-argon-high"),
             Some("gemini-4-argon".to_string())

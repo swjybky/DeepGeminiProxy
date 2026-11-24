@@ -314,6 +314,20 @@ impl RateLimitTracker {
             });
     }
 
+    /// A newer shared quota observation supersedes a retired dedicated Argon bucket.
+    pub(crate) fn retire_argon_quota_buckets(&self, account_id: &str, observed_at: i64) {
+        let key = self.get_limit_key(account_id, Some("gemini-4-argon"));
+        for mut entry in self.quota_limits.iter_mut() {
+            if entry.key().0 == key
+                && entry.key().1.to_ascii_lowercase().contains("argon")
+                && entry.observed_at < observed_at
+            {
+                entry.observed_at = observed_at;
+                entry.reset_time = None;
+            }
+        }
+    }
+
     /// 标记账号请求成功，重置连续失败计数
     ///
     /// 当账号成功完成请求后调用此方法，将其失败计数归零，
@@ -1102,6 +1116,25 @@ impl Default for RateLimitTracker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn argon_shared_quota_retires_only_older_dedicated_bucket_limits() {
+        let tracker = RateLimitTracker::new();
+        let argon = "gemini-4-argon";
+        let dedicated = "gemini-argon-wtu-weekly";
+        let shared = "gemini-weekly";
+        let reset = Some(SystemTime::now() + Duration::from_secs(3600));
+        tracker.sync_quota_bucket("account", argon, dedicated, 100, reset, true);
+        tracker.sync_quota_bucket("account", argon, shared, 200, reset, true);
+        tracker.retire_argon_quota_buckets("account", 99);
+        assert!(tracker.is_rate_limited("account", Some(argon)));
+
+        tracker.retire_argon_quota_buckets("account", 200);
+        assert!(tracker.is_rate_limited("account", Some(argon)));
+        tracker.sync_quota_bucket("account", argon, shared, 300, None, true);
+        tracker.sync_quota_bucket("account", argon, dedicated, 150, reset, true);
+        assert!(!tracker.is_rate_limited("account", Some(argon)));
+    }
 
     #[test]
     fn test_parse_retry_time_minutes_seconds() {

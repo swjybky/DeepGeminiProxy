@@ -54,11 +54,13 @@ test('Ultra tier without dedicated argon group has Argon capability', () => {
     };
 
     assertEqual(hasAccountArgonCapability(ultraAccount), true, 'Ultra hasAccountArgonCapability');
-    assertEqual(checkArgonEligibility(ultraAccount.quota.quota_groups, ultraAccount.quota.models, 'ultra'), true, 'Ultra checkArgonEligibility');
+    assertEqual(checkArgonEligibility(ultraAccount.quota.quota_groups, ultraAccount.quota.models), true, 'Ultra checkArgonEligibility');
     const summaries = getGroupQuotaSummaries(ultraAccount.quota.quota_groups, ultraAccount.quota.models, 'ultra');
     const argonSummary = summaries.find(s => s.key === 'argon');
-    assertEqual(Boolean(argonSummary), true, 'Argon summary present for Ultra');
-    assertEqual(argonSummary?.weekly?.percentage, 84, 'Argon inherits weekly quota from Gemini pool');
+    const geminiSummary = summaries.find(s => s.key === 'gemini');
+    assertEqual(argonSummary, undefined, 'Ultra shared quota has one Gemini summary');
+    assertEqual(geminiSummary?.weekly?.percentage, 84, 'Gemini weekly quota');
+    assertEqual(geminiSummary?.supportedModels?.includes('gemini-4-argon-high'), true, 'Gemini pool lists Argon');
 });
 
 // 2. Pro Tier Tests: With dedicated Argon quota group
@@ -89,7 +91,7 @@ test('Pro tier with dedicated Argon quota group has Argon capability', () => {
     };
 
     assertEqual(hasAccountArgonCapability(proAccount), true, 'Pro hasAccountArgonCapability');
-    assertEqual(checkArgonEligibility(proAccount.quota.quota_groups, proAccount.quota.models, 'pro'), true, 'Pro checkArgonEligibility');
+    assertEqual(checkArgonEligibility(proAccount.quota.quota_groups, proAccount.quota.models), true, 'Pro checkArgonEligibility');
     const summaries = getGroupQuotaSummaries(proAccount.quota.quota_groups, proAccount.quota.models, 'pro');
     const argonSummary = summaries.find(s => s.key === 'argon');
     assertEqual(Boolean(argonSummary), true, 'Argon summary present for Pro');
@@ -123,10 +125,30 @@ test('Free tier without Argon group strictly does NOT have Argon capability', ()
     };
 
     assertEqual(hasAccountArgonCapability(freeAccount), false, 'Free hasAccountArgonCapability');
-    assertEqual(checkArgonEligibility(freeAccount.quota.quota_groups, freeAccount.quota.models, 'free'), false, 'Free checkArgonEligibility');
+    assertEqual(checkArgonEligibility(freeAccount.quota.quota_groups, freeAccount.quota.models), false, 'Free checkArgonEligibility');
     const summaries = getGroupQuotaSummaries(freeAccount.quota.quota_groups, freeAccount.quota.models, 'free');
     const argonSummary = summaries.find(s => s.key === 'argon');
     assertEqual(Boolean(argonSummary), false, 'Argon summary must be absent for Free');
+});
+
+test('Pro Argon uses shared Gemini weekly and 5h windows', () => {
+    const model = { name: 'gemini-4-argon-medium', percentage: 79, reset_time: '' };
+    const weeklyReset = new Date(Date.now() + 2 * 86400000).toISOString();
+    const groups = [{
+        display_name: 'Gemini Models',
+        buckets: [
+            { bucket_id: 'gemini-5h', window: '5h', remaining_fraction: 0.85, reset_time: '' },
+            { bucket_id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0, reset_time: weeklyReset },
+        ],
+    }];
+    assertEqual(checkArgonEligibility(groups, [model]), true, 'Explicit Pro Argon capability');
+    assertEqual(checkArgonEligibility(groups), false, 'Shared quota alone grants no capability');
+    const summaries = getGroupQuotaSummaries(groups, [model], 'pro');
+    assertEqual(summaries.some(s => s.key === 'argon'), false, 'No duplicate Argon quota');
+    assertEqual(summaries[0].supportedModels?.includes(model.name), true, 'Argon is on the Gemini card');
+    const display = getModelQuotaDisplay(model.name, model, groups);
+    assertEqual(display.percentage, 0, 'Shared weekly exhaustion overrides positive 5h');
+    assertEqual(display.resetTime, weeklyReset, 'Shared weekly reset time');
 });
 
 // 4. getModelQuotaDisplay tests

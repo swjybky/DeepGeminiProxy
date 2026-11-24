@@ -30,4 +30,5 @@
 | 删除反重力账号后，新请求仍使用旧账号 | [网关残留已删除账号](error/proxy-deleted-account.md) |
 | 503、无法区分本地代理错误和上游错误 | [503 排查](docs/test_503_issue.md) |
 | 冷启动仍显示同模型的多个思考档位 | [冷启动模型列表](error/model-catalog-cold-start.md) |
+| Argon 在官方可选，但代理列表缺项 | [Argon 共享配额](error/argon-shared-quota.md) |
 | 暂存区有他人内容、测试报无关文件错误 | [混合工作区](error/mixed-worktree.md) |

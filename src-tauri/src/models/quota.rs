@@ -50,6 +50,44 @@ pub struct QuotaGroup {
     pub buckets: Vec<QuotaBucket>,
 }
 
+impl QuotaGroup {
+    pub(crate) fn is_argon(&self) -> bool {
+        let is_argon = |name: &str| name.to_ascii_lowercase().contains("argon");
+        is_argon(&self.display_name)
+            || self.buckets.iter().any(|bucket| {
+                is_argon(&bucket.bucket_id) || bucket.display_name.as_deref().is_some_and(is_argon)
+            })
+    }
+
+    fn is_third_party(&self) -> bool {
+        let name = self.display_name.to_ascii_lowercase();
+        name.contains("claude")
+            || name.contains("gpt")
+            || name.contains("3p")
+            || self
+                .buckets
+                .iter()
+                .any(|bucket| bucket.bucket_id.to_ascii_lowercase().contains("3p"))
+    }
+}
+
+/// Prefer a dedicated Argon group only when the account still reports one.
+pub(crate) fn quota_groups_for_model<'a>(
+    groups: &'a [QuotaGroup],
+    model: &str,
+) -> impl Iterator<Item = &'a QuotaGroup> {
+    let model = model.to_ascii_lowercase();
+    let dedicated_argon = model.contains("argon") && groups.iter().any(QuotaGroup::is_argon);
+    let third_party = model.contains("claude") || model.contains("gpt");
+    groups.iter().filter(move |group| {
+        if dedicated_argon {
+            group.is_argon()
+        } else {
+            !group.is_argon() && group.is_third_party() == third_party
+        }
+    })
+}
+
 /// 模型配额信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelQuota {
