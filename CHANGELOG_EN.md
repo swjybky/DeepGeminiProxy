@@ -3,6 +3,10 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.6 (2026-11-24)**:
+        -   Fixed gateway routing after an Antigravity account is deleted. After a single or bulk deletion, new requests in the same session select an eligible account from the pool.
+        -   Background quota refreshes discard credential updates for deleted accounts, so signing in again with the same email keeps the new credentials.
+
     *   **v1.0.5 (2026-11-22)**:
         -   Added one-click DeepWrite setup on Windows. Gateway credentials are encrypted using the current Windows user's secure storage.
         -   DeepWrite setup recognizes both separate and inline credential storage by their configuration fields, so version upgrades keep working when the format stays compatible.
