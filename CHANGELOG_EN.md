@@ -3,6 +3,10 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.7 (2026-11-24)**:
+        -   Fixed Gemini 4 Argon missing from the gateway model list after its quota moved to the shared Gemini pool. Eligible accounts use the pool’s five-hour and weekly limits.
+        -   The account page lists Argon in the Gemini quota group when it uses the shared pool. If Argon is missing after upgrading, refresh the account’s quota.
+
     *   **v1.0.6 (2026-11-24)**:
         -   Fixed gateway routing after an Antigravity account is deleted. After a single or bulk deletion, new requests in the same session select an eligible account from the pool.
         -   Background quota refreshes discard credential updates for deleted accounts, so signing in again with the same email keeps the new credentials.
