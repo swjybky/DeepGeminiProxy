@@ -3,6 +3,11 @@
 > DeepGeminiProxy 的独立版本及继承的上游发布历史。返回项目主页请查看 [README_ZH.md](README_ZH.md) | [English Changelog](CHANGELOG_EN.md)。
 
 *   **版本演进**:
+    *   **v1.0.8 (2026-11-28)**:
+        -   仪表盘新增「禁止查询限额」开关。开启后暂停反重力账号的手动刷新、后台配额查询和预热，并保留已缓存的配额。无头模式支持通过 `ABV_DISABLE_QUOTA_QUERY` 设置。
+        -   DeepWrite 新增 `/deepwrite/v1` 网关入口，使用独立的会话标识，并支持按 Antigravity IDE 的报文格式发送请求。
+        -   修复网关的思考参数选择。模型目录同时声明思考预算和思考等级时，优先发送预算，包括 Gemini 3.8 Flash 的自适应预算。
+
     *   **v1.0.7 (2026-11-24)**:
         -   修复 Gemini 4 Argon 合并配额后从网关模型列表消失的问题。符合条件的账号使用 Gemini 共享池的 5 小时和周配额。
         -   账号页将共享配额下的 Argon 列在 Gemini 配额组内。已升级且列表仍缺项的用户可刷新一次账号配额。

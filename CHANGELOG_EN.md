@@ -3,6 +3,11 @@
 > Independent DeepGeminiProxy releases and inherited upstream history. Return to the project home at [README.md](README.md).
 
 *   **Version History**:
+    *   **v1.0.8 (2026-11-28)**:
+        -   Added a dashboard switch to pause manual quota refreshes, background quota queries, and warmup for Antigravity accounts while retaining cached quota data. Headless deployments can set `ABV_DISABLE_QUOTA_QUERY`.
+        -   Added a dedicated `/deepwrite/v1` gateway endpoint with separate session identifiers and support for the Antigravity IDE request format.
+        -   Fixed the gateway's thinking parameter selection. When the model catalog supplies both a thinking budget and a thinking level, the gateway sends the budget, including the adaptive budget for Gemini 3.8 Flash.
+
     *   **v1.0.7 (2026-11-24)**:
         -   Fixed Gemini 4 Argon missing from the gateway model list after its quota moved to the shared Gemini pool. Eligible accounts use the pool’s five-hour and weekly limits.
         -   The account page lists Argon in the Gemini quota group when it uses the shared pool. If Argon is missing after upgrading, refresh the account’s quota.
