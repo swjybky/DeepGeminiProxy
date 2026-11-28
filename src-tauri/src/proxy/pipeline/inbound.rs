@@ -1591,8 +1591,10 @@ impl InboundThinkingPipeline {
 
         // ════════════════════════════════════════════════════════════════════
         // 传输通道判定（完全以官方模型结构体为准）
-        // 1. 官方声明了 thinkingLevel  → 等级通道（即使同时声明了 budget，也以等级为准）；
-        // 2. 否则声明了 thinkingBudget → 预算通道；
+        // 1. 官方声明了 thinkingBudget（含 -1 自适应）→ 预算通道。桌面端三份抓包里
+        //    `gemini-3.8-flash-high`（level=3, budget=-1）实发 `thinkingBudget: -1`，
+        //    `gemini-3.8-flash-medium`（level=2, budget=4000）实发 4000；同时声明时预算优先。
+        // 2. 只声明了 thinkingLevel → 等级通道（如 Claude 5.5 系列）。
         // 3. 两者皆无                 → 不写 thinkingConfig（图像/内部模型等）。
         // 不再依据模型名或版本号猜测通道，避免官方换字段后整条链路静默失效。
         // ════════════════════════════════════════════════════════════════════
@@ -1664,24 +1666,23 @@ impl InboundThinkingPipeline {
         //
         // 客户端直控模式已下线：传输通道与档位一律由官方模型结构体 + 路由层决定，
         // 避免客户端 budget 污染与“双向控制”导致的双字段冲突。
+        // 通道优先级：预算（含 -1）> 等级，与桌面端抓包一致。
         // ════════════════════════════════════════════════════════════════════
-        if is_thinking_level_model {
-            // 等级通道：官方声明了 thinkingLevel 的模型
-            // （3.8 Flash / 4 Argon / Claude 5.5 / 2.5 Flash / 3-flash 等）。
-            // 官方场上 thinkingLevel 与 thinkingBudget 只会生效其一，这里严格只发等级。
-            let level = resolve_level_for_model(client_effort);
-            generation_config["thinkingConfig"] = json!({
-                "includeThoughts": true,
-                "thinkingLevel": level
-            });
-        } else if let Some(budget) = official_budget {
-            // 预算通道：官方结构体明确声明 thinkingBudget 的模型
-            // （今日仅 gemini-2.5-pro=1024、gpt-oss-120b=8192，以及部分未升级账号的 claude-4.6=1024）。
+        if let Some(budget) = official_budget {
+            // 预算通道：官方结构体声明了 thinkingBudget 的模型。
+            // 桌面端抓包里 level 与 budget 并存时，实际发出的就是 budget。
             generation_config["thinkingConfig"] = if budget == 0 {
                 json!({ "includeThoughts": false, "thinkingBudget": 0 })
             } else {
                 json!({ "includeThoughts": true, "thinkingBudget": budget })
             };
+        } else if is_thinking_level_model {
+            // 等级通道：只声明了 thinkingLevel 的模型（如 Claude 5.5 系列）。
+            let level = resolve_level_for_model(client_effort);
+            generation_config["thinkingConfig"] = json!({
+                "includeThoughts": true,
+                "thinkingLevel": level
+            });
         } else if official_info.is_none() {
             // 官方目录未收录的模型（如历史 *-thinking-exp 实验模型）：
             // 保留旧的预算解析作为兼容兜底，避免静默丢掉现有的思考能力。
@@ -3325,7 +3326,7 @@ mod tests {
             update_thinking_budget_config, ThinkingBudgetConfig, ThinkingControlSource,
         };
 
-        // 客户端直控模式已下线：无论 client_switch 传入什么，传输通道与等级
+        // 客户端直控模式已下线：无论 client_switch 传入什么，传输通道与档位
         // 都只能由官方模型结构体 + 路由层决定。
         let mut config = ThinkingBudgetConfig::default();
         config.control_source = ThinkingControlSource::Gateway;
@@ -3339,10 +3340,11 @@ mod tests {
         }
         let _guard = ResetGuard;
 
-        // 1. 缺省：官方 tiered=3 → thinkingLevel HIGH，绝无 thinkingBudget
+        // 1. 同时声明 level 与 budget：按桌面端抓包发 budget，不发 level。
+        //    `gemini-3.8-flash-high` 抓包实发 {"includeThoughts":true,"thinkingBudget":-1}。
         let mut gc2 = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
-            "gemini-3.8-flash-tiered",
+            "gemini-3.8-flash-high",
             &mut gc2,
             ClientThinkingSwitch::Default,
             None,
@@ -3351,51 +3353,31 @@ mod tests {
         );
         let tc2 = gc2.get("thinkingConfig").unwrap().as_object().unwrap();
         assert_eq!(tc2.get("includeThoughts"), Some(&json!(true)));
-        assert_eq!(tc2.get("thinkingLevel"), Some(&json!("HIGH")));
-        assert!(tc2.get("thinkingBudget").is_none());
-
-        // 2. 显式等级：thinkingLevel=LOW，绝无 thinkingBudget，必须带上 includeThoughts: true
-        let mut gc3 = json!({});
-        InboundThinkingPipeline::configure_inbound_thinking(
-            "gemini-3.8-flash-tiered",
-            &mut gc3,
-            ClientThinkingSwitch::Default,
-            Some("low"),
-            None,
-            None,
-        );
-        let tc3 = gc3.get("thinkingConfig").unwrap().as_object().unwrap();
-        assert_eq!(tc3.get("includeThoughts"), Some(&json!(true)));
-        assert_eq!(tc3.get("thinkingLevel"), Some(&json!("LOW")));
-        assert!(tc3.get("thinkingBudget").is_none());
-
-        // 2.1 非标准 effort 不再原样透传：等级以官方结构体为准（tiered=3 → HIGH）
-        let mut gc3_custom = json!({});
-        let budget_custom_res = InboundThinkingPipeline::configure_inbound_thinking(
-            "gemini-3.8-flash-tiered",
-            &mut gc3_custom,
-            ClientThinkingSwitch::Default,
-            Some("custom_ultra_level"),
-            None,
-            None,
-        );
-        let tc3_custom = gc3_custom
-            .get("thinkingConfig")
-            .unwrap()
-            .as_object()
-            .unwrap();
-        assert_eq!(tc3_custom.get("includeThoughts"), Some(&json!(true)));
-        assert_eq!(tc3_custom.get("thinkingLevel"), Some(&json!("HIGH")));
+        assert_eq!(tc2.get("thinkingBudget"), Some(&json!(-1)));
         assert!(
-            tc3_custom.get("thinkingBudget").is_none(),
-            "等级通道模型必须严格不携带 thinkingBudget"
+            tc2.get("thinkingLevel").is_none(),
+            "预算通道模型必须严格不携带 thinkingLevel"
         );
-        assert!(budget_custom_res.is_none());
 
-        // 3. 等级通道模型：客户端预算被忽略（等级优先），仍发官方等级
+        // 1.1 非 -1 的正预算同样原样发出（抓包 medium 为 4000）。
+        let mut gc2b = json!({});
+        InboundThinkingPipeline::configure_inbound_thinking(
+            "gemini-3.8-flash-medium",
+            &mut gc2b,
+            ClientThinkingSwitch::Default,
+            None,
+            None,
+            None,
+        );
+        let tc2b = gc2b.get("thinkingConfig").unwrap().as_object().unwrap();
+        assert_eq!(tc2b.get("includeThoughts"), Some(&json!(true)));
+        assert_eq!(tc2b.get("thinkingBudget"), Some(&json!(4000)));
+        assert!(tc2b.get("thinkingLevel").is_none());
+
+        // 3. 预算通道模型：客户端预算被忽略（通道与档位由官方结构体决定）
         let mut gc4 = json!({});
         let budget_res = InboundThinkingPipeline::configure_inbound_thinking(
-            "gemini-3.8-flash-tiered",
+            "gemini-3.8-flash-high",
             &mut gc4,
             ClientThinkingSwitch::Enabled,
             None,
@@ -3404,12 +3386,13 @@ mod tests {
         );
         let tc4 = gc4.get("thinkingConfig").unwrap().as_object().unwrap();
         assert_eq!(tc4.get("includeThoughts"), Some(&json!(true)));
-        assert_eq!(tc4.get("thinkingLevel"), Some(&json!("HIGH")));
+        assert_eq!(tc4.get("thinkingBudget"), Some(&json!(-1)));
         assert!(
-            tc4.get("thinkingBudget").is_none(),
-            "官方声明了 thinkingLevel 时，thinkingBudget 必须被忽略"
+            tc4.get("thinkingLevel").is_none(),
+            "预算通道模型必须严格不携带 thinkingLevel"
         );
-        assert!(budget_res.is_none());
+        // -1 是自适应预算，原样返回给调用方（负值不参与 maxOutputTokens 协商）。
+        assert_eq!(budget_res, Some(-1));
     }
 
     #[test]

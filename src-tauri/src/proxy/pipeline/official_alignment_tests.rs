@@ -327,7 +327,7 @@ mod tests {
         }
         let _guard = ResetGuard;
 
-        // 1. Gemini 3.8 Flash High -> 官方已迁移至 thinkingLevel=3（预算字段不再生效）
+        // 1. Gemini 3.8 Flash High -> 桌面端抓包实发 thinkingBudget: -1（level 与 budget 并存时预算优先）
         let mut gc_high = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
             "gemini-3.8-flash-high",
@@ -339,10 +339,10 @@ mod tests {
         );
         let tc_high = gc_high.get("thinkingConfig").unwrap();
         assert_eq!(tc_high["includeThoughts"], true);
-        assert_eq!(tc_high["thinkingLevel"], "HIGH");
-        assert!(tc_high.get("thinkingBudget").is_none());
+        assert_eq!(tc_high["thinkingBudget"], -1);
+        assert!(tc_high.get("thinkingLevel").is_none());
 
-        // 2. Gemini 3.8 Flash Low -> thinkingLevel=1 -> LOW
+        // 2. Gemini 3.8 Flash Low -> 官方 budget=1000
         let mut gc_low = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
             "gemini-3.8-flash-low",
@@ -354,10 +354,10 @@ mod tests {
         );
         let tc_low = gc_low.get("thinkingConfig").unwrap();
         assert_eq!(tc_low["includeThoughts"], true);
-        assert_eq!(tc_low["thinkingLevel"], "LOW");
-        assert!(tc_low.get("thinkingBudget").is_none());
+        assert_eq!(tc_low["thinkingBudget"], 1000);
+        assert!(tc_low.get("thinkingLevel").is_none());
 
-        // 3. Gemini 3.8 Flash Medium -> thinkingLevel=2 -> MEDIUM
+        // 3. Gemini 3.8 Flash Medium -> 官方 budget=4000
         let mut gc_med = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
             "gemini-3.8-flash-medium",
@@ -369,8 +369,8 @@ mod tests {
         );
         let tc_med = gc_med.get("thinkingConfig").unwrap();
         assert_eq!(tc_med["includeThoughts"], true);
-        assert_eq!(tc_med["thinkingLevel"], "MEDIUM");
-        assert!(tc_med.get("thinkingBudget").is_none());
+        assert_eq!(tc_med["thinkingBudget"], 4000);
+        assert!(tc_med.get("thinkingLevel").is_none());
 
         // 4. Claude Sonnet 4.6 -> official default thinking_budget is 1024
         let mut gc_claude = json!({});
@@ -551,7 +551,7 @@ mod tests {
         assert!(gc_custom["thinkingConfig"].get("thinkingLevel").is_none());
         update_thinking_budget_config(ThinkingBudgetConfig::default());
 
-        // 8. Inbound pipeline：具名档位模型走等级通道，且等级由模型档位决定（不受 client effort 影响）
+        // 8. Inbound pipeline：同时声明 level 与 budget 的型号按桌面端抓包发 budget
         let mut gc = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
             "gemini-3.8-flash-high",
@@ -561,23 +561,25 @@ mod tests {
             None,
             None,
         );
-        assert_eq!(gc["thinkingConfig"]["thinkingLevel"], "HIGH");
+        assert_eq!(gc["thinkingConfig"]["thinkingBudget"], -1);
         assert_eq!(gc["thinkingConfig"]["includeThoughts"], true);
-        assert!(gc["thinkingConfig"].get("thinkingBudget").is_none());
+        assert!(gc["thinkingConfig"].get("thinkingLevel").is_none());
 
-        // 7. Argon 系列必须输出 thinkingLevel，严禁输出 thinkingBudget！
-        let mut gc_argon = json!({});
+        // 7. 只声明 level 的型号仍必须输出 thinkingLevel，严禁输出 thinkingBudget
+        let mut gc_level_only = json!({});
         InboundThinkingPipeline::configure_inbound_thinking(
-            "gemini-4-argon-medium",
-            &mut gc_argon,
+            "claude-sonnet-5-5-high",
+            &mut gc_level_only,
             ClientThinkingSwitch::Default,
             None,
             None,
             None,
         );
-        assert_eq!(gc_argon["thinkingConfig"]["thinkingLevel"], "MEDIUM");
-        assert_eq!(gc_argon["thinkingConfig"]["includeThoughts"], true);
-        assert!(gc_argon["thinkingConfig"].get("thinkingBudget").is_none());
+        assert_eq!(gc_level_only["thinkingConfig"]["thinkingLevel"], "HIGH");
+        assert_eq!(gc_level_only["thinkingConfig"]["includeThoughts"], true);
+        assert!(gc_level_only["thinkingConfig"]
+            .get("thinkingBudget")
+            .is_none());
     }
 
     #[test]
