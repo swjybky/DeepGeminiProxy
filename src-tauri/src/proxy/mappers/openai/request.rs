@@ -1707,9 +1707,12 @@ mod tests {
         let parts = first_id.split('/').collect::<Vec<_>>();
         assert_eq!(parts.len(), 5);
         assert_eq!(parts[0], "agent");
-        assert_eq!(parts[1].len(), 16);
+        // 会话段与轨迹段都是官方形态的完整 UUID。
+        assert_eq!(parts[1].len(), 36);
+        assert!(uuid::Uuid::parse_str(parts[1]).is_ok());
         assert!(parts[2].parse::<i64>().is_ok());
-        assert_eq!(parts[3].len(), 8);
+        assert_eq!(parts[3].len(), 36);
+        assert!(uuid::Uuid::parse_str(parts[3]).is_ok());
         assert!(parts[4].parse::<u64>().is_ok());
     }
 

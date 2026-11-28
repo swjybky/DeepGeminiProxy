@@ -288,6 +288,8 @@ pub async fn ensure_admin_server(
         config.request_timeout,
         config.upstream_proxy.clone(),
         config.user_agent_override.clone(),
+        config.antigravity_wire_projection,
+        config.deepwrite_prompt_prefix,
         crate::proxy::ProxySecurityConfig::from_proxy_config(&config),
         monitor,
         config.experimental.clone(),

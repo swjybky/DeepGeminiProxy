@@ -3,13 +3,48 @@
 /// From account ID string to a stable negative signed integer session ID
 /// Implements FNV-1a hash which matches the official client behavior of sending
 /// a large negative integer for `sessionId`.
+///
+/// 折叠顺序是「先异或再乘」，与原版 Stravia 的 `native_session_id` 逐位一致。
+/// 空输入因此得到 offset basis 本身 —— 官方抓包里看到的 `-3750763034362895579`
+/// 就是这个值，可用作算法对齐的锚点。
 pub fn derive_session_id(account_id: &str) -> String {
-    let mut hash: i64 = -3750763034362895579_i64; // FNV offset basis
-    for byte in account_id.bytes() {
-        hash = hash.wrapping_mul(1099511628211_i64);
-        hash ^= byte as i64;
+    let hash = account_id
+        .bytes()
+        .fold(0xcbf29ce484222325_u64, |hash, byte| {
+            (hash ^ u64::from(byte)).wrapping_mul(0x1_0000_01b3)
+        });
+    (hash as i64).to_string()
+}
+
+/// 上一轮出站 `labels.trajectory_id` 的账本。
+///
+/// IDE 抓包的 `labels` 里第一个键是 `last_execution_id`，值是**上一轮真实**的
+/// 轨迹 UUID。它记录的是既成事实，不是可推导的常量：没有上一轮就不发，
+/// 有上一轮就如实回填。因此这里只存真发出过的值，绝不合成。
+static LAST_TRAJECTORY: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, String>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+fn trajectory_key(account_id: &str, store_key: &str) -> String {
+    format!("{}::{}", account_id, store_key)
+}
+
+/// 读取该会话上一轮发出的轨迹 ID。没有上一轮时返回 `None` —— 调用方此时不应写该字段。
+pub fn last_trajectory_id(account_id: &str, store_key: &str) -> Option<String> {
+    LAST_TRAJECTORY
+        .lock()
+        .ok()
+        .and_then(|map| map.get(&trajectory_key(account_id, store_key)).cloned())
+}
+
+/// 记下本轮真正发出的轨迹 ID，供下一轮作为 `last_execution_id` 回填。
+pub fn remember_trajectory_id(account_id: &str, store_key: &str, trajectory_id: &str) {
+    if let Ok(mut map) = LAST_TRAJECTORY.lock() {
+        map.insert(
+            trajectory_key(account_id, store_key),
+            trajectory_id.to_string(),
+        );
     }
-    hash.to_string()
 }
 
 // [FIX session-1M] Upstream accumulates conversation input server-side per sessionId.
@@ -82,6 +117,13 @@ mod tests {
         let x = derive_session_id("my_account@gmail.com");
         let y = derive_session_id("my_account@gmail.com");
         assert_eq!(x, y);
+    }
+
+    /// 算法锚点：官方抓包的 sessionId 就是 FNV-1a64 的 offset basis，
+    /// 说明折叠顺序是「先异或再乘」。换成别的顺序这一条立刻失败。
+    #[test]
+    fn test_derive_session_id_matches_the_captured_offset_basis() {
+        assert_eq!(derive_session_id(""), "-3750763034362895579");
     }
 
     #[test]

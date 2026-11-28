@@ -614,6 +614,12 @@ pub async fn save_config(
             .await;
         // [NEW] 更新 User-Agent 配置
         instance.axum_server.update_user_agent(&config.proxy).await;
+        instance
+            .axum_server
+            .update_antigravity_wire_projection(config.proxy.antigravity_wire_projection);
+        instance
+            .axum_server
+            .update_deepwrite_prompt_prefix(config.proxy.deepwrite_prompt_prefix);
         // 更新 Thinking Budget 配置
         crate::proxy::update_thinking_budget_config(config.proxy.thinking_budget.clone());
         // [NEW] 更新全局系统提示词配置
@@ -660,6 +666,12 @@ pub async fn save_config(
         admin.axum_server.update_experimental(&config.proxy).await;
         admin.axum_server.update_debug_logging(&config.proxy).await;
         admin.axum_server.update_user_agent(&config.proxy).await;
+        admin
+            .axum_server
+            .update_antigravity_wire_projection(config.proxy.antigravity_wire_projection);
+        admin
+            .axum_server
+            .update_deepwrite_prompt_prefix(config.proxy.deepwrite_prompt_prefix);
         admin
             .axum_server
             .update_proxy_pool(config.proxy.proxy_pool.clone())

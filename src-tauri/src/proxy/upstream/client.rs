@@ -5,6 +5,7 @@ use dashmap::DashMap;
 use once_cell::sync::Lazy;
 use rquest::{header, Client, Response, StatusCode};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tokio::time::Duration;
@@ -692,6 +693,9 @@ pub struct UpstreamClient {
     proxy_pool: Option<Arc<crate::proxy::proxy_pool::ProxyPoolManager>>,
     client_cache: DashMap<String, Client>, // proxy_id -> Client
     user_agent_override: RwLock<Option<String>>,
+    antigravity_wire_projection: AtomicBool,
+    /// DeepWrite 专用入口的提示词搬移开关，默认关闭。
+    deepwrite_prompt_prefix: AtomicBool,
     endpoint_health: EndpointHealthTracker,
 }
 
@@ -725,8 +729,20 @@ impl UpstreamClient {
             proxy_pool,
             client_cache: DashMap::new(),
             user_agent_override: RwLock::new(None),
+            antigravity_wire_projection: AtomicBool::new(false),
+            deepwrite_prompt_prefix: AtomicBool::new(false),
             endpoint_health: get_global_endpoint_health().clone(),
         }
+    }
+
+    pub(crate) fn set_antigravity_wire_projection(&self, enabled: bool) {
+        self.antigravity_wire_projection
+            .store(enabled, Ordering::Relaxed);
+    }
+
+    pub(crate) fn set_deepwrite_prompt_prefix(&self, enabled: bool) {
+        self.deepwrite_prompt_prefix
+            .store(enabled, Ordering::Relaxed);
     }
 
     /// [HOT-RELOAD] Rebuild the default HTTP client using the supplied upstream
@@ -1356,6 +1372,21 @@ impl UpstreamClient {
         extra_headers: std::collections::HashMap<String, String>,
         account_id: Option<&str>, // [NEW] Account ID
     ) -> Result<UpstreamCallResult, String> {
+        // 字段投影对全入口生效（显式开关）；提示词搬移只对 DeepWrite 专用入口、
+        // 且开关打开时生效 —— 它会把写作规则从系统层降到用户层，语义代价明确。
+        let wire = crate::proxy::pipeline::antigravity_wire::ingress_is_deepwrite();
+        let project_wire_fields = self.antigravity_wire_projection.load(Ordering::Relaxed);
+        let prefix_system_prompt = wire && self.deepwrite_prompt_prefix.load(Ordering::Relaxed);
+        // 搬移必须先于清洗：被搬走的客户端规则仍要走 System 轨的身份归一化，
+        // 不能在清洗之后才塞进用户层。
+        let mut body = body;
+        if let Some(inner) = body.get_mut("request") {
+            crate::proxy::pipeline::antigravity_wire::rewrite_before_sanitize(
+                method,
+                inner,
+                prefix_system_prompt,
+            );
+        }
         // [DEFENSE] 全局终极防御拦截：净化所有发往上游报文中的损坏/空 inlineData 以及触发 Google WAF 拦截的违规计费元数据，并最终统一对齐官方信封与前缀拓扑
         if let Some(inner) = body.get_mut("request") {
             crate::proxy::mappers::common_utils::sanitize_gemini_payload_inline_data(inner);
@@ -1370,11 +1401,11 @@ impl UpstreamClient {
             );
             crate::proxy::mappers::common_utils::ensure_gemini_payload_ends_with_user(&mut body);
         }
-        if method == "countTokens" {
-            crate::proxy::pipeline::InboundThinkingPipeline::align_count_tokens_envelope(&mut body);
-        } else {
-            crate::proxy::pipeline::InboundThinkingPipeline::align_official_envelope(&mut body);
-        }
+        crate::proxy::pipeline::antigravity_wire::rewrite_after_sanitize(
+            method,
+            &mut body,
+            project_wire_fields,
+        );
 
         // [Pipeline First] 在**统一的转出报文**（Gemini Canonical IR）上估一次 token：
         // 四条协议适配器最终都汇聚到这里，因此估算口径天然一致，

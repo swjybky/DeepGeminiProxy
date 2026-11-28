@@ -15,6 +15,8 @@ export interface ProxyConfig {
     custom_mapping_expose?: Record<string, boolean>;
     builtin_mapping_version?: number;
     request_timeout: number;
+    antigravity_wire_projection?: boolean;
+    deepwrite_prompt_prefix?: boolean;
     enable_logging: boolean;
     capture_health_logs?: boolean;
     log_retention?: LogRetentionConfig;

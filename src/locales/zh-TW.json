@@ -936,6 +936,10 @@
                 "empty": "目前沒有可用模型。"
             },
             "auto_start_tooltip": "應用啟動時自動啟動本地 API 代理服務。",
+            "antigravity_wire_projection": "官方封包投影",
+            "antigravity_wire_projection_tooltip": "丟棄上游未承諾的擴充欄位，並把 requestType 固定為 agent。只改欄位集合，不改變系統提示詞位置與會話身分；預設關閉。",
+            "deepwrite_prompt_prefix": "DeepWrite 提示詞搬移",
+            "deepwrite_prompt_prefix_tooltip": "啟用專用入口時，把 DeepWrite 的系統指令從系統層搬到對話開頭（Stravia 式封包）。規則會降為使用者層，需靠橋接語委託；僅對 /deepwrite/v1 生效。",
             "allow_lan_access": "允許區域網路存取",
             "allow_lan_access_tooltip": "開啟後繫結到 IPv6/IPv4 雙棧萬用位址（[::] / 0.0.0.0），區域網路及公網其他裝置均可存取。建議同時開啟鑑權並妥善保管 API 金鑰；修改後需重啟服務生效。",
             "allow_lan_access_hint_enabled": "🌐 監聽 [::] / 0.0.0.0 (IPv6/IPv4 雙棧)，區域網路與外部裝置可存取",

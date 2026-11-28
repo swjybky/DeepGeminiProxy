@@ -628,6 +628,29 @@ export default function ApiProxy() {
         }
     };
 
+    const handleProxySwitchChange = async (
+        field: 'antigravity_wire_projection' | 'deepwrite_prompt_prefix',
+        enabled: boolean,
+    ) => {
+        if (!appConfig || loading || savingProxySettings) return;
+        const config = {
+            ...appConfig,
+            proxy: { ...appConfig.proxy, [field]: enabled },
+        };
+        setSavingProxySettings(true);
+        try {
+            await invoke('save_config', { config });
+            setAppConfig(current => current && ({
+                ...current,
+                proxy: { ...current.proxy, [field]: enabled },
+            }));
+        } catch (error) {
+            showToast(`${t('common.error')}: ${error}`, 'error');
+        } finally {
+            setSavingProxySettings(false);
+        }
+    };
+
     const handleRunUaSandboxTest = async (overrideUa?: string, modelToTest?: string) => {
         const targetModel = modelToTest || uaSandboxModel;
         const effectiveUa = overrideUa !== undefined ? overrideUa : (appConfig?.proxy.user_agent_override || latestHubUa);
@@ -2179,7 +2202,7 @@ print(response.choices[0].message.content)`;
                                         {t('proxy.config.request_timeout_hint')}
                                     </p>
                                 </div>
-                                <div className="flex items-center pt-5">
+                                <div className="flex flex-col justify-center gap-2.5 pt-5">
                                     <label className="flex items-center cursor-pointer gap-3 select-none">
                                         <input
                                             type="checkbox"
@@ -2193,6 +2216,42 @@ print(response.choices[0].message.content)`;
                                                 text={t('proxy.config.auto_start_tooltip')}
                                                 ariaLabel={t('proxy.config.auto_start')}
                                                 placement="right"
+                                            />
+                                        </span>
+                                    </label>
+                                    <label className="flex items-center cursor-pointer gap-3 select-none">
+                                        <input
+                                            type="checkbox"
+                                            role="switch"
+                                            aria-label={t('proxy.config.antigravity_wire_projection')}
+                                            className="toggle toggle-sm bg-gray-200 dark:bg-base-300 border-gray-300 dark:border-base-300 checked:bg-blue-600 checked:border-blue-600 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-base-200"
+                                            checked={appConfig.proxy.antigravity_wire_projection ?? false}
+                                            disabled={loading || savingProxySettings}
+                                            onChange={(e) => void handleProxySwitchChange('antigravity_wire_projection', e.target.checked)}
+                                        />
+                                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 inline-flex items-center gap-1">
+                                            {t('proxy.config.antigravity_wire_projection')}
+                                            <HelpTooltip
+                                                text={t('proxy.config.antigravity_wire_projection_tooltip')}
+                                                ariaLabel={t('proxy.config.antigravity_wire_projection')}
+                                            />
+                                        </span>
+                                    </label>
+                                    <label className="flex items-center cursor-pointer gap-3 select-none">
+                                        <input
+                                            type="checkbox"
+                                            role="switch"
+                                            aria-label={t('proxy.config.deepwrite_prompt_prefix')}
+                                            className="toggle toggle-sm bg-gray-200 dark:bg-base-300 border-gray-300 dark:border-base-300 checked:bg-blue-600 checked:border-blue-600 disabled:opacity-50 disabled:bg-gray-100 dark:disabled:bg-base-200"
+                                            checked={appConfig.proxy.deepwrite_prompt_prefix ?? false}
+                                            disabled={loading || savingProxySettings}
+                                            onChange={(e) => void handleProxySwitchChange('deepwrite_prompt_prefix', e.target.checked)}
+                                        />
+                                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-200 inline-flex items-center gap-1">
+                                            {t('proxy.config.deepwrite_prompt_prefix')}
+                                            <HelpTooltip
+                                                text={t('proxy.config.deepwrite_prompt_prefix_tooltip')}
+                                                ariaLabel={t('proxy.config.deepwrite_prompt_prefix')}
                                             />
                                         </span>
                                     </label>

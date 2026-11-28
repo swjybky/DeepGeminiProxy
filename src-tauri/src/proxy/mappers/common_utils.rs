@@ -872,6 +872,15 @@ mod tests {
         );
         assert!(a.starts_with("agent/"));
         assert!(a.ends_with("/3"));
+        // 会话段与轨迹段都是完整 UUID：官方抓包里两段均为 36 字符。
+        let conversation = a.split('/').nth(1).unwrap();
+        assert_eq!(conversation.len(), 36, "会话段必须是完整 UUID 形态");
+        assert!(uuid::Uuid::parse_str(conversation).is_ok());
+        let traj_a = a.split('/').nth(3).unwrap();
+        let traj_b = b.split('/').nth(3).unwrap();
+        assert_eq!(traj_a.len(), 36, "轨迹段必须是完整 UUID 形态");
+        assert!(uuid::Uuid::parse_str(traj_a).is_ok());
+        assert_ne!(traj_a, traj_b, "每次请求的轨迹段必须独立");
     }
 
     /// requestId **不得**泄露网关内部 blended session_id 的原文。
@@ -2254,19 +2263,30 @@ pub fn resolve_official_fingerprint(
 /// - 不同 agent / 会话的 session_id 不同 → 派生值不同，隔离性保持。
 pub fn build_official_request_id(session_id: &str, step: u64) -> String {
     let ts = chrono::Utc::now().timestamp_millis();
-    let sanitized = crate::proxy::thinking_store::sanitize_session_id(session_id);
-    let conversation = if sanitized.is_empty() {
-        uuid::Uuid::new_v4().to_string()
-    } else {
-        let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
-        sha2::Digest::update(&mut hasher, sanitized.as_bytes());
-        let digest = sha2::Digest::finalize(hasher);
-        let hex = format!("{:x}", digest);
-        hex[..16].to_string()
-    };
-    // 轨迹段每请求唯一，与 unixMs 共同保证幂等隔离
-    let trajectory = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    let conversation = official_conversation_id(session_id);
+    // 轨迹段必须是完整 UUID：官方三份抓包的 trajectory 段与 labels.trajectory_id
+    // 是同一个 36 字符 UUID，截断形态一眼可辨。每请求唯一，与 unixMs 共同保证幂等隔离。
+    let trajectory = uuid::Uuid::new_v4();
     format!("agent/{}/{}/{}/{}", conversation, ts, trajectory, step)
+}
+
+/// 官方 `requestId` 的会话段是完整 UUID（`agent/<conversation>/<unixMs>/<trajectory>/<step>`）。
+///
+/// 同一会话必须稳定，但不能把网关内部的 blended session_id 原文写给上游；
+/// 因此用 SHA-256 派生后按 UUID 位宽重新组装，既保 UUID 形态也保持单向。
+fn official_conversation_id(session_id: &str) -> String {
+    let sanitized = crate::proxy::thinking_store::sanitize_session_id(session_id);
+    if sanitized.is_empty() {
+        return uuid::Uuid::new_v4().to_string();
+    }
+    let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
+    sha2::Digest::update(&mut hasher, sanitized.as_bytes());
+    let mut bytes = [0_u8; 16];
+    bytes.copy_from_slice(&sha2::Digest::finalize(hasher)[..16]);
+    // 抹掉版本/变体位，让派生值仍是合法 UUID 而不是随手拼的 hex。
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes).to_string()
 }
 
 /// [JEIKCODE SYNTHETIC USER REMINDER]

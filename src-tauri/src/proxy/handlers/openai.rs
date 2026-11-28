@@ -924,6 +924,8 @@ fn is_codex_transcript_only_assistant_message(item: &Value, text: &str) -> bool 
 
 #[cfg(test)]
 mod stream_peek_tests {
+    use super::api_route_path;
+    use super::api_route_prefix;
     use super::build_image_contents;
     use super::build_image_edit_body;
     use super::convert_chat_response_to_responses;
@@ -947,6 +949,7 @@ mod stream_peek_tests {
     use super::save_session_unless_response_cancelled;
     use super::stream_chunk_has_error_event;
     use super::stream_chunk_has_image_data;
+    use super::strip_route_prefix;
     use super::validate_input_image_limits;
     use super::validate_responses_image_data_url;
     use super::validate_responses_input_image_limits_with_mode;
@@ -999,6 +1002,44 @@ mod stream_peek_tests {
         assert!(!is_responses_api_path("/v1/chat/completions"));
         assert!(!is_responses_api_path("/v1/completions"));
         assert!(!is_responses_api_path("/v1beta/models"));
+    }
+
+    /// DeepWrite 专用入口复用同一套处理器。协议判定必须先去前缀再按根路径比较，
+    /// 否则 /deepwrite/v1/responses 会被当成 Completions 分支。
+    #[test]
+    fn deepwrite_prefix_resolves_to_its_own_route_then_root_protocol() {
+        assert_eq!(api_route_prefix("/deepwrite/v1/responses"), "/deepwrite/v1");
+        assert_eq!(
+            api_route_prefix("/deepwrite/v1/chat/completions"),
+            "/deepwrite/v1"
+        );
+        assert_eq!(api_route_prefix("/v1/responses"), "/v1");
+        assert_eq!(api_route_prefix("/responses"), "/v1");
+
+        assert_eq!(
+            strip_route_prefix("/deepwrite/v1", "/deepwrite/v1/responses"),
+            "/responses"
+        );
+        assert!(is_responses_api_path(strip_route_prefix(
+            "/deepwrite/v1",
+            "/deepwrite/v1/responses"
+        )));
+        assert!(!is_responses_api_path(strip_route_prefix(
+            "/deepwrite/v1",
+            "/deepwrite/v1/chat/completions"
+        )));
+        // 通用入口不受影响。
+        assert_eq!(strip_route_prefix("/v1", "/v1/responses"), "/v1/responses");
+
+        // 对外可见路径必须带上真实前缀，避免审计把两个入口记成同一条。
+        assert_eq!(
+            api_route_path("/deepwrite/v1", "/chat/completions"),
+            "/deepwrite/v1/chat/completions"
+        );
+        assert_eq!(
+            api_route_path("/v1", "/chat/completions"),
+            "/chat/completions"
+        );
     }
 
     #[test]
@@ -2073,7 +2114,38 @@ fn prefix_with_step_marker(_marker: Option<String>, content: String) -> String {
     strip_codex_step_markers(&content)
 }
 
+/// 注入入口前缀：出站咽喉据此决定是否搬移系统提示词。
+/// 前缀必须用 `&'static str` 交给 task-local，避免跨请求持有借用。
 pub async fn handle_chat_completions(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    upstream_recorder: Option<
+        axum::extract::Extension<crate::proxy::monitor::UpstreamRequestBodyHolder>,
+    >,
+    user_identity: Option<
+        axum::extract::Extension<crate::proxy::middleware::auth::UserTokenIdentity>,
+    >,
+    Json(body): Json<Value>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    let route_prefix = api_route_prefix(uri.path());
+    crate::proxy::pipeline::antigravity_wire::INGRESS_PREFIX
+        .scope(
+            route_prefix,
+            handle_chat_completions_inner(
+                axum::extract::OriginalUri(uri),
+                State(state),
+                headers,
+                upstream_recorder,
+                user_identity,
+                Json(body),
+            ),
+        )
+        .await
+}
+
+async fn handle_chat_completions_inner(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     State(state): State<AppState>,
     headers: HeaderMap, // [CHANGED] Extract headers
     upstream_recorder: Option<
@@ -2085,6 +2157,8 @@ pub async fn handle_chat_completions(
     Json(mut body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     use crate::proxy::upstream::gemini_app::{self, Endpoint};
+    // /deepwrite/v1/* 与 /v1/* 共用本处理器；会话身份按入口前缀隔离。
+    let route_prefix = api_route_prefix(uri.path());
     if let Some(response) = gemini_app::dispatch(
         state.gemini_app.as_deref(),
         &state.enabled_models,
@@ -3612,6 +3686,40 @@ pub(crate) fn is_responses_api_path(path: &str) -> bool {
     path == "/v1/responses" || path == "/responses" || path == "/responses/compact"
 }
 
+/// 出口前缀。DeepWrite 专用入口与通用 `/v1` 共用同一套处理器，
+/// 只有会话身份（进而影响 requestId / sessionId / 粘性）按前缀隔离。
+pub(crate) const DEEPWRITE_API_PREFIX: &str = "/deepwrite/v1";
+
+/// 解析共用处理器上的出口前缀。必须走 `OriginalUri`：仅注册别名路由时
+/// `uri.path()` 会被路由匹配层覆盖，协议判定与日志都会认错入口。
+#[inline]
+pub(crate) fn api_route_prefix(uri_path: &str) -> &'static str {
+    if uri_path.starts_with(DEEPWRITE_API_PREFIX) {
+        DEEPWRITE_API_PREFIX
+    } else {
+        "/v1"
+    }
+}
+
+/// 把出口前缀拼到对外可见的路径上。处理器内部按 `/` 根路径比较，
+/// 回调给客户端与审计日志的路径必须带真实前缀。
+#[inline]
+pub(crate) fn api_route_path(prefix: &str, path: &str) -> String {
+    if prefix == "/v1" || !path.starts_with('/') {
+        return path.to_string();
+    }
+    format!("{prefix}{path}")
+}
+
+/// 去掉出口前缀，恢复处理器内部使用的根路径（`/responses`、`/chat/completions` …）。
+#[inline]
+pub(crate) fn strip_route_prefix<'a>(prefix: &str, path: &'a str) -> &'a str {
+    if prefix == "/v1" {
+        return path;
+    }
+    path.strip_prefix(prefix).unwrap_or(path)
+}
+
 /// 处理 Legacy Completions API (/v1/completions)
 /// 将 Prompt 转换为 Chat Message 格式，复用 handle_chat_completions
 pub async fn handle_completions(
@@ -3624,11 +3732,45 @@ pub async fn handle_completions(
     user_identity: Option<
         axum::extract::Extension<crate::proxy::middleware::auth::UserTokenIdentity>,
     >,
+    Json(body): Json<Value>,
+) -> Response {
+    let route_prefix = api_route_prefix(uri.path());
+    crate::proxy::pipeline::antigravity_wire::INGRESS_PREFIX
+        .scope(
+            route_prefix,
+            handle_completions_inner(
+                axum::extract::OriginalUri(uri),
+                State(state),
+                headers,
+                upstream_recorder,
+                user_identity,
+                Json(body),
+            ),
+        )
+        .await
+}
+
+async fn handle_completions_inner(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    upstream_recorder: Option<
+        axum::extract::Extension<crate::proxy::monitor::UpstreamRequestBodyHolder>,
+    >,
+    user_identity: Option<
+        axum::extract::Extension<crate::proxy::middleware::auth::UserTokenIdentity>,
+    >,
     Json(mut body): Json<Value>,
 ) -> Response {
     use crate::proxy::upstream::gemini_app::{self, Endpoint};
-    let endpoint =
-        matches!(uri.path(), "/v1/responses" | "/responses").then_some(Endpoint::Responses);
+    // 入口前缀取自 OriginalUri：/deepwrite/v1/* 与 /v1/* 共用本处理器，
+    // 只按前缀隔离会话身份，协议判定仍按根路径。
+    let route_prefix = api_route_prefix(uri.path());
+    let endpoint = matches!(
+        uri.path(),
+        "/v1/responses" | "/responses" | "/deepwrite/v1/responses"
+    )
+    .then_some(Endpoint::Responses);
     if let Some(response) = gemini_app::dispatch(
         state.gemini_app.as_deref(),
         &state.enabled_models,
@@ -3648,7 +3790,7 @@ pub async fn handle_completions(
     let original_body = debug_logger::is_enabled(&debug_cfg).then(|| {
         crate::proxy::payload_audit::reorder_payload_fields(&debug_value_without_inline_data(&body))
     });
-    let is_responses_api = is_responses_api_path(uri.path());
+    let is_responses_api = is_responses_api_path(strip_route_prefix(route_prefix, uri.path()));
     let is_codex_style = body.get("input").is_some() || body.get("instructions").is_some();
     let store_response = responses_store_enabled(&body);
 
@@ -4552,9 +4694,9 @@ pub async fn handle_completions(
             if let Err(ref e) = token_result {
                 if crate::proxy::handlers::common::is_transient_token_error(e) {
                     tracing::warn!(
-                            "Token acquisition transient error ({}), retrying once with force_rotate...",
-                            e
-                        );
+                        "Token acquisition transient error ({}), retrying once with force_rotate...",
+                        e
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     token_result = token_manager
                         .get_token_filtered(
@@ -5168,7 +5310,8 @@ pub async fn handle_completions(
                     use crate::proxy::mappers::openai::collector::collect_stream_to_json;
                     match collect_stream_to_json(combined_stream).await {
                         Ok(chat_resp) => {
-                            let is_responses_api = is_responses_api_path(uri.path());
+                            let is_responses_api =
+                                is_responses_api_path(strip_route_prefix(route_prefix, uri.path()));
 
                             if is_responses_api {
                                 let is_structured = is_request_structured_output(&openai_req);
@@ -5365,7 +5508,8 @@ pub async fn handle_completions(
                 Some(&client_tool_names),
             );
 
-            let is_responses_api = is_responses_api_path(uri.path());
+            let is_responses_api =
+                is_responses_api_path(strip_route_prefix(route_prefix, uri.path()));
 
             if is_responses_api {
                 let is_structured = is_request_structured_output(&openai_req);
@@ -5531,7 +5675,8 @@ pub async fn handle_completions(
                 retried_without_thinking = true;
                 tracing::warn!(
                     "[{}] Pipeline: Thinking signature error detected on upstream (HTTP {}). Purging corrupted signatures and retrying on same account.",
-                    trace_id, status_code
+                    trace_id,
+                    status_code
                 );
                 session_scope.purge_signatures(&mapped_model);
                 force_rotate = false;
@@ -5556,14 +5701,21 @@ pub async fn handle_completions(
             if can_rotate {
                 tracing::warn!(
                     "[{}] 上游报错模型不可用 (HTTP {})，已标记账号 {} 对模型 [{}] 临时熔断，继续换号重试 ({}/{})...",
-                    trace_id, status_code, email, mapped_model, attempt, pool_size
+                    trace_id,
+                    status_code,
+                    email,
+                    mapped_model,
+                    attempt,
+                    pool_size
                 );
                 force_rotate = true;
                 continue;
             }
             tracing::warn!(
                 "[{}] Pipeline: Target model [{}] not found on upstream (HTTP {}). Pool exhausted without account-level lockout.",
-                trace_id, mapped_model, status_code
+                trace_id,
+                mapped_model,
+                status_code
             );
             let protocol = if is_responses_api {
                 "responses"
@@ -5949,6 +6101,7 @@ pub async fn handle_retrieve_model(
 /// OpenAI Images API: POST /v1/images/generations
 /// 处理图像生成请求，转换为 Gemini API 格式
 pub async fn handle_chat_redirection(
+    axum::extract::OriginalUri(uri): axum::extract::OriginalUri,
     State(state): State<AppState>,
     headers: HeaderMap,
     upstream_recorder: Option<
@@ -5956,7 +6109,15 @@ pub async fn handle_chat_redirection(
     >,
     Json(body): Json<Value>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    handle_chat_completions(State(state), headers, upstream_recorder, None, Json(body)).await
+    handle_chat_completions(
+        axum::extract::OriginalUri(uri),
+        State(state),
+        headers,
+        upstream_recorder,
+        None,
+        Json(body),
+    )
+    .await
 }
 
 async fn intercept_chat_to_image(
@@ -7343,6 +7504,8 @@ pub async fn handle_responses_websocket(
 
 async fn handle_websocket_session(mut socket: WebSocket, headers: HeaderMap, state: AppState) {
     tracing::info!("Codex responses websocket: client connected");
+    // 复用 HTTP 入口的会话身份前缀；WebSocket 恒走通用 /v1。
+    let ws_uri = axum::http::Uri::from_static("/v1/responses");
     let mut session_state = WebsocketSessionState {
         last_request: None,
         last_response_output: json!([]),
@@ -7462,6 +7625,7 @@ async fn handle_websocket_session(mut socket: WebSocket, headers: HeaderMap, sta
 
         let openai_body = convert_codex_to_openai_request(normalized);
         let response_result = handle_chat_completions(
+            axum::extract::OriginalUri(ws_uri.clone()),
             State(state.clone()),
             headers.clone(),
             None,

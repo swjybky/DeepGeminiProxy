@@ -991,6 +991,10 @@
                 "empty": "No models are currently available."
             },
             "auto_start_tooltip": "Automatically starts the local API Proxy service when the app launches.",
+            "antigravity_wire_projection": "Antigravity wire projection",
+            "antigravity_wire_projection_tooltip": "Drops extensions the upstream never promised and pins requestType to agent. Field set only; system prompt placement and session identity are unchanged. Off by default.",
+            "deepwrite_prompt_prefix": "DeepWrite prompt relocation",
+            "deepwrite_prompt_prefix_tooltip": "On the dedicated entry, moves DeepWrite system instructions from the system layer into the leading turn (Stravia-style assembly). Rules drop to the user layer and rely on a bridge sentence. Applies to /deepwrite/v1 only.",
             "allow_lan_access": "Allow LAN Access",
             "allow_lan_access_tooltip": "When enabled, the service binds to IPv6/IPv4 dual-stack wildcard ([::] / 0.0.0.0) so LAN and external devices can access it. Keep authorization enabled and protect your API key; service restart required to apply.",
             "allow_lan_access_hint_enabled": "🌐 Listening on [::] / 0.0.0.0 (IPv6/IPv4 Dual-Stack), LAN and external devices can access",

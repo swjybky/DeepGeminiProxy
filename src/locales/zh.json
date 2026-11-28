@@ -968,6 +968,10 @@
             "port_hint": "默认 8045，修改端口需重启服务",
             "auto_start": "跟随应用自动启动",
             "auto_start_tooltip": "应用启动时自动启动本地 API 代理服务。",
+            "antigravity_wire_projection": "官方报文投影",
+            "antigravity_wire_projection_tooltip": "丢弃上游未承诺的扩展字段，并把 requestType 固定为 agent。只改字段集合，不改变系统提示词位置和会话身份；默认关闭。",
+            "deepwrite_prompt_prefix": "DeepWrite 提示词搬移",
+            "deepwrite_prompt_prefix_tooltip": "启用专用入口时，把 DeepWrite 的系统指令从系统层搬到对话开头（Stravia 式组包）。规则会降为用户层，需靠桥接语委托；只对 /deepwrite/v1 生效。",
             "enabled_models": {
                 "title": "启用模型",
                 "fetch": "拉取模型列表",

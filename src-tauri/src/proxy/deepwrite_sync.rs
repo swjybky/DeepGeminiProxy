@@ -520,9 +520,10 @@ mod desktop {
             .and_then(|model| model["baseUrl"].as_str())
             .filter(|url| {
                 reqwest::Url::parse(url).is_ok_and(|url| {
-                    url.scheme() == "http"
+                    // 专用入口优先；兼容改造前写入的 /v1 接入。
+                    matches!(url.path(), "/deepwrite/v1" | "/v1")
+                        && url.scheme() == "http"
                         && url.host_str() == Some("127.0.0.1")
-                        && url.path() == "/v1"
                         && url.query().is_none()
                         && url.fragment().is_none()
                         && url.username().is_empty()
@@ -716,7 +717,9 @@ mod desktop {
         if key.trim().is_empty() {
             return Err("请先为 Antigravity 网关配置 API Key。".into());
         }
-        let base_url = format!("http://127.0.0.1:{port}/v1");
+        // 走 DeepWrite 专用入口：与 /v1 共用同一套处理器与上游转换，
+        // 只把会话身份与通用入口隔离，便于单独对照出站组包。
+        let base_url = format!("http://127.0.0.1:{port}/deepwrite/v1");
         let client = reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())

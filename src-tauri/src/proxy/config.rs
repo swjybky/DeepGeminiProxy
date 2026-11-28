@@ -1131,6 +1131,17 @@ pub struct ProxyConfig {
     #[serde(default = "default_request_timeout")]
     pub request_timeout: u64,
 
+    /// 出站报文按官方抓包做字段投影：丢弃上游未承诺的扩展字段，并把
+    /// requestType 固定为 agent。只改字段集合，不动系统提示词位置与会话身份。
+    /// 默认关闭 —— 它会让所有协议入口的出站形态一起变化。
+    #[serde(default)]
+    pub antigravity_wire_projection: bool,
+
+    /// DeepWrite 专用入口把客户端系统指令搬到 contents[0]（Stravia 式组包）。
+    /// 只在 /deepwrite/v1 生效，默认关闭：规则会从系统层降到用户层。
+    #[serde(default)]
+    pub deepwrite_prompt_prefix: bool,
+
     /// 是否开启请求日志记录 (监控)
     #[serde(default)]
     pub enable_logging: bool,
@@ -1382,6 +1393,8 @@ impl Default for ProxyConfig {
             custom_mapping_expose: default_custom_mapping_expose(),
             builtin_mapping_version: default_builtin_mapping_version(),
             request_timeout: default_request_timeout(),
+            antigravity_wire_projection: false,
+            deepwrite_prompt_prefix: false,
             enable_logging: true,       // 默认开启，支持 token 统计功能
             capture_health_logs: false, // 默认关闭，过滤 GET 探活与第三方网关探测请求且不入库
             log_retention: LogRetentionConfig::default(),
@@ -1503,6 +1516,28 @@ pub enum ProxySelectionStrategy {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn antigravity_wire_projection_defaults_off_and_preserves_saved_value() {
+        assert!(!ProxyConfig::default().antigravity_wire_projection);
+
+        // 旧配置没有该字段时按默认关闭。
+        let mut saved = serde_json::to_value(ProxyConfig::default()).unwrap();
+        saved
+            .as_object_mut()
+            .unwrap()
+            .remove("antigravity_wire_projection");
+        let old: ProxyConfig = serde_json::from_value(saved.clone()).unwrap();
+        assert!(!old.antigravity_wire_projection);
+
+        saved["antigravity_wire_projection"] = serde_json::json!(true);
+        let opted_in: ProxyConfig = serde_json::from_value(saved).unwrap();
+        assert!(opted_in.antigravity_wire_projection);
+        assert_eq!(
+            serde_json::to_value(opted_in).unwrap()["antigravity_wire_projection"],
+            true
+        );
+    }
 
     #[test]
     fn test_normalize_proxy_url() {

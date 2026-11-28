@@ -54,7 +54,11 @@ function providerFor(app: AgentApp) {
 
 export async function getAgentStatus(app: AgentApp, proxyUrl: string): Promise<AgentStatus> {
     const provider = providerFor(app);
-    const url = endpoint(app, proxyUrl);
+    // DeepWrite 走 /deepwrite/v1 专用入口，不再用通用 /v1。
+    const url =
+        app === 'DeepWrite'
+            ? `${proxyUrl.trim().replace(/\/+$/, '').replace(/\/v1$/, '')}/deepwrite/v1`
+            : endpoint(app, proxyUrl);
     if (app === 'DeepWrite') {
         if (!isTauri()) {
             return {

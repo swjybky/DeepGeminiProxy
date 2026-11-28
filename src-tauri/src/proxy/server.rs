@@ -549,6 +549,14 @@ impl AxumServer {
         tracing::info!("User-Agent 配置已热更新: {:?}", config.user_agent_override);
     }
 
+    pub(crate) fn update_antigravity_wire_projection(&self, enabled: bool) {
+        self.upstream.set_antigravity_wire_projection(enabled);
+    }
+
+    pub(crate) fn update_deepwrite_prompt_prefix(&self, enabled: bool) {
+        self.upstream.set_deepwrite_prompt_prefix(enabled);
+    }
+
     pub fn update_qos_auto_jail(&self, enabled: bool) {
         self.token_manager.set_qos_auto_jail(enabled);
         tracing::info!("QoS 自动限流进小黑屋机制已热更新: enabled={}", enabled);
@@ -569,6 +577,8 @@ impl AxumServer {
         request_timeout: u64,
         upstream_proxy: crate::proxy::config::UpstreamProxyConfig,
         user_agent_override: Option<String>,
+        antigravity_wire_projection: bool,
+        deepwrite_prompt_prefix: bool,
         security_config: crate::proxy::ProxySecurityConfig,
         monitor: Arc<crate::proxy::monitor::ProxyMonitor>,
         experimental_config: crate::proxy::config::ExperimentalConfig,
@@ -642,6 +652,8 @@ impl AxumServer {
                 if user_agent_override.is_some() {
                     u.set_user_agent_override(user_agent_override).await;
                 }
+                u.set_antigravity_wire_projection(antigravity_wire_projection);
+                u.set_deepwrite_prompt_prefix(deepwrite_prompt_prefix);
                 u
             },
             monitor: monitor.clone(),
@@ -778,6 +790,28 @@ impl AxumServer {
                 "/v1/thinking/sessions/:session_id",
                 axum::routing::get(handlers::thinking::handle_session_stats)
                     .delete(handlers::thinking::handle_delete_session),
+            )
+            // DeepWrite 专用入口：与 /v1 共用同一套处理器与上游转换，
+            // 只按入口前缀隔离会话身份（DeepWrite 的对话有自己的会话边界）。
+            .route(
+                "/deepwrite/v1/chat/completions",
+                post(handlers::openai::handle_chat_completions),
+            )
+            .route(
+                "/deepwrite/v1/completions",
+                post(handlers::openai::handle_completions),
+            )
+            .route(
+                "/deepwrite/v1/responses",
+                post(handlers::openai::handle_completions),
+            )
+            .route(
+                "/deepwrite/v1/models",
+                get(handlers::openai::handle_list_models),
+            )
+            .route(
+                "/deepwrite/v1/models/:model",
+                get(handlers::openai::handle_retrieve_model),
             )
             // 应用 AI 服务特定的层
             // 注意：Axum layer 执行顺序是从下往上（洋葱模型）
@@ -2136,6 +2170,12 @@ async fn admin_save_config(
         .upstream
         .set_user_agent_override(new_config.proxy.user_agent_override.clone())
         .await;
+    state
+        .upstream
+        .set_antigravity_wire_projection(new_config.proxy.antigravity_wire_projection);
+    state
+        .upstream
+        .set_deepwrite_prompt_prefix(new_config.proxy.deepwrite_prompt_prefix);
 
     // 同步 QoS 自动限流进小黑屋机制开关
     state
