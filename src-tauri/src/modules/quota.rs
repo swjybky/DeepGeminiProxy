@@ -43,6 +43,15 @@ const NEAR_READY_THRESHOLD: i32 = 95;
 const MAX_RETRIES: u32 = 3;
 const RETRY_DELAY_SECS: u64 = 30;
 
+pub const QUOTA_QUERY_DISABLED_ERROR: &str = "Quota query is disabled";
+
+/// Returns true when the global "disable quota query" switch is enabled in AppConfig.
+pub fn is_quota_query_disabled() -> bool {
+    config::load_app_config()
+        .map(|c| c.disable_quota_query)
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct QuotaResponse {
     models: std::collections::HashMap<String, crate::models::OfficialModelInfo>,
@@ -171,6 +180,10 @@ async fn fetch_project_id(
     email: &str,
     account_id: Option<&str>,
 ) -> (Option<String>, Option<String>) {
+    if is_quota_query_disabled() {
+        return (None, None);
+    }
+
     let client = create_standard_client(account_id).await;
     let meta = json!({"metadata": {"ideType": "ANTIGRAVITY"}});
     let health_tracker = get_quota_endpoint_health();
@@ -301,6 +314,14 @@ pub async fn fetch_quota_with_cache(
     account_id: Option<&str>,
 ) -> crate::error::AppResult<(QuotaData, Option<String>)> {
     use crate::error::AppError;
+
+    if is_quota_query_disabled() {
+        crate::modules::logger::log_info(&format!(
+            "[Quota] Skipping upstream quota query for {} (disable_quota_query is enabled)",
+            email
+        ));
+        return Err(AppError::Config(QUOTA_QUERY_DISABLED_ERROR.to_string()));
+    }
 
     // `loadCodeAssist` 是订阅等级的唯一权威来源，必须每次都调用。
     //
@@ -699,6 +720,10 @@ async fn fetch_quota_summary(
     project_id: Option<&str>,
     account_id: Option<&str>,
 ) -> Option<Vec<crate::models::quota::QuotaGroup>> {
+    if is_quota_query_disabled() {
+        return None;
+    }
+
     let client = create_standard_client(account_id).await;
     let payload = if let Some(pid) = project_id {
         json!({ "project": pid })
@@ -826,6 +851,10 @@ pub async fn fetch_all_quotas(
 pub async fn get_valid_token_for_warmup(
     account: &crate::models::account::Account,
 ) -> Result<(String, String), String> {
+    if is_quota_query_disabled() {
+        return Err(QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     let mut account = account.clone();
 
     // Check and auto-refresh token
@@ -869,6 +898,10 @@ pub async fn warmup_model_directly(
     percentage: i32,
     _account_id: Option<&str>,
 ) -> bool {
+    if is_quota_query_disabled() {
+        return false;
+    }
+
     // Get currently configured proxy port
     let port = config::load_app_config()
         .map(|c| c.proxy.port)
@@ -926,6 +959,13 @@ pub async fn warmup_model_directly(
 
 /// Smart warmup for all accounts
 pub async fn warm_up_all_accounts() -> Result<String, String> {
+    if is_quota_query_disabled() {
+        crate::modules::logger::log_info(
+            "[Warmup] Skipping warmup because disable_quota_query is enabled",
+        );
+        return Err(QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     let mut retry_count = 0;
 
     loop {
@@ -1145,6 +1185,13 @@ pub async fn warm_up_all_accounts() -> Result<String, String> {
 
 /// Warmup for single account
 pub async fn warm_up_account(account_id: &str) -> Result<String, String> {
+    if is_quota_query_disabled() {
+        crate::modules::logger::log_info(
+            "[Warmup] Skipping warmup because disable_quota_query is enabled",
+        );
+        return Err(QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     let accounts = crate::modules::account::list_accounts().unwrap_or_default();
     let account_owned = accounts
         .iter()
@@ -1418,5 +1465,151 @@ mod tests {
             tracker.get_ordered_endpoints(&QUOTA_SUMMARY_ENDPOINTS)[0],
             "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
         );
+    }
+
+    #[test]
+    fn disable_quota_query_blocks_quota_and_warmup_paths() {
+        struct EnvGuard {
+            _lock: std::sync::MutexGuard<'static, ()>,
+            prev_data_dir: Option<String>,
+            _temp_dir: tempfile::TempDir,
+        }
+
+        impl EnvGuard {
+            fn new() -> Self {
+                let lock = crate::modules::account::SHARED_TEST_ENV_LOCK
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let prev_data_dir = std::env::var("ABV_DATA_DIR").ok();
+                let temp_dir = tempfile::tempdir().unwrap();
+                std::env::set_var("ABV_DATA_DIR", temp_dir.path());
+                Self {
+                    _lock: lock,
+                    prev_data_dir,
+                    _temp_dir: temp_dir,
+                }
+            }
+        }
+
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                match &self.prev_data_dir {
+                    Some(v) => std::env::set_var("ABV_DATA_DIR", v),
+                    None => std::env::remove_var("ABV_DATA_DIR"),
+                }
+            }
+        }
+
+        let guard = EnvGuard::new();
+
+        let mut cfg = crate::models::AppConfig::new();
+        assert!(!cfg.disable_quota_query);
+        crate::modules::config::save_app_config(&cfg).unwrap();
+        assert!(!is_quota_query_disabled());
+
+        cfg.disable_quota_query = true;
+        crate::modules::config::save_app_config(&cfg).unwrap();
+        assert!(is_quota_query_disabled());
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        rt.block_on(async {
+            let err = fetch_quota_with_cache(
+                "synthetic-token",
+                "demo@example.test",
+                None,
+                Some("demo-acc"),
+            )
+            .await
+            .unwrap_err();
+            assert!(
+                err.to_string().contains(QUOTA_QUERY_DISABLED_ERROR),
+                "unexpected error: {err}"
+            );
+
+            assert!(fetch_quota_summary(
+                "synthetic-token",
+                "demo@example.test",
+                None,
+                Some("demo-acc"),
+            )
+            .await
+            .is_none());
+
+            let mut acc = crate::models::Account::new(
+                "demo-acc".to_string(),
+                "demo@example.test".to_string(),
+                crate::models::TokenData::new(
+                    "synthetic-access".to_string(),
+                    "synthetic-refresh".to_string(),
+                    3600,
+                    Some("demo@example.test".to_string()),
+                    None,
+                    None,
+                    false,
+                    None,
+                ),
+            );
+            let retry_err = crate::modules::account::fetch_quota_with_retry(&mut acc)
+                .await
+                .unwrap_err();
+            assert!(
+                retry_err.to_string().contains(QUOTA_QUERY_DISABLED_ERROR),
+                "unexpected error: {retry_err}"
+            );
+            assert!(!acc.disabled);
+            assert!(acc.quota.is_none());
+
+            let batch_err = crate::modules::account::refresh_all_quotas_logic()
+                .await
+                .err()
+                .expect("expected refresh_all_quotas_logic to be blocked");
+            assert!(batch_err.contains(QUOTA_QUERY_DISABLED_ERROR));
+
+            let warmup_all_err = warm_up_all_accounts().await.unwrap_err();
+            assert!(warmup_all_err.contains(QUOTA_QUERY_DISABLED_ERROR));
+
+            let warmup_one_err = warm_up_account("demo-acc").await.unwrap_err();
+            assert!(warmup_one_err.contains(QUOTA_QUERY_DISABLED_ERROR));
+
+            let tm = crate::proxy::TokenManager::new(guard._temp_dir.path().to_path_buf());
+            let locked = tm
+                .fetch_and_lock_with_realtime_quota(
+                    "demo@example.test",
+                    crate::proxy::rate_limit::RateLimitReason::QuotaExhausted,
+                    Some("gemini-3.8-flash-high".to_string()),
+                    None,
+                )
+                .await;
+            assert!(!locked);
+
+            assert_eq!(
+                fetch_project_id("synthetic-token", "demo@example.test", Some("demo-acc")).await,
+                (None, None)
+            );
+
+            let warmup_token_err = get_valid_token_for_warmup(&acc).await.unwrap_err();
+            assert!(warmup_token_err.contains(QUOTA_QUERY_DISABLED_ERROR));
+
+            assert!(
+                !warmup_model_directly(
+                    "synthetic-token",
+                    "gemini-3.8-flash-high",
+                    "demo-proj",
+                    "demo@example.test",
+                    100,
+                    Some("demo-acc"),
+                )
+                .await
+            );
+
+            let project_err = crate::modules::account::auto_fetch_account_project_id("demo-acc")
+                .await
+                .unwrap_err();
+            assert!(project_err.contains(QUOTA_QUERY_DISABLED_ERROR));
+        });
     }
 }

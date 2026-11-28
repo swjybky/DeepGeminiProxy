@@ -6835,9 +6835,11 @@ pub async fn handle_images_generations_internal(
     });
 
     // [FIX] 图像生成成功后触发配额刷新 (Issue #1995)
-    tokio::spawn(async move {
-        let _ = account::refresh_all_quotas_logic().await;
-    });
+    if !crate::modules::quota::is_quota_query_disabled() {
+        tokio::spawn(async move {
+            let _ = account::refresh_all_quotas_logic().await;
+        });
+    }
 
     let email_header = used_email.unwrap_or_default();
     Ok((email_header, openai_response))
@@ -7424,9 +7426,11 @@ pub async fn handle_images_edits(
         "data": images
     });
 
-    tokio::spawn(async move {
-        let _ = account::refresh_all_quotas_logic().await;
-    });
+    if !crate::modules::quota::is_quota_query_disabled() {
+        tokio::spawn(async move {
+            let _ = account::refresh_all_quotas_logic().await;
+        });
+    }
 
     let email_header = used_email.unwrap_or_default();
     Ok((

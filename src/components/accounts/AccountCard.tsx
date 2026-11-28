@@ -405,10 +405,14 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                     </button>
                     {onWarmup && (
                         <button
-                            className={`p-1.5 rounded-lg transition-all ${(isRefreshing || isDisabled) ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/10 cursor-not-allowed' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30'}`}
+                            className={`p-1.5 rounded-lg transition-all ${(isRefreshing || isDisabled || !!config?.disable_quota_query) ? 'text-orange-600 bg-orange-50 dark:bg-orange-900/10 opacity-50 cursor-not-allowed' : 'text-gray-400 hover:text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30'}`}
                             onClick={(e) => { e.stopPropagation(); onWarmup(); }}
-                            title={isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.loading') : t('accounts.warmup_this', '预热该账号'))}
-                            disabled={isRefreshing || isDisabled}
+                            title={
+                                config?.disable_quota_query
+                                    ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                    : (isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.loading') : t('accounts.warmup_this', '预热该账号')))
+                            }
+                            disabled={isRefreshing || isDisabled || !!config?.disable_quota_query}
                         >
                             <Sparkles className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-pulse' : ''}`} />
                         </button>
@@ -416,10 +420,16 @@ function AccountCard({ account, selected, onSelect, isCurrent: propIsCurrent, ac
                     <button
                         className={`p-1.5 rounded-lg transition-all ${isRefreshing
                             ? 'text-green-600 bg-green-50'
-                            : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
+                            : config?.disable_quota_query
+                                ? 'text-gray-400 opacity-50 cursor-not-allowed'
+                                : 'text-gray-400 hover:text-green-600 hover:bg-green-50'}`}
                         onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-                        disabled={isRefreshing || isDisabled}
-                        title={isDisabled ? t('accounts.disabled_tooltip') : t('common.refresh')}
+                        disabled={isRefreshing || isDisabled || !!config?.disable_quota_query}
+                        title={
+                            config?.disable_quota_query
+                                ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                : (isDisabled ? t('accounts.disabled_tooltip') : t('common.refresh'))
+                        }
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>

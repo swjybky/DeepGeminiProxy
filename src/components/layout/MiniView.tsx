@@ -232,8 +232,10 @@ export default function MiniView() {
         );
     };
 
+    const disableQuotaQuery = !!config?.disable_quota_query;
+
     const handleRefresh = async () => {
-        if (isRefreshing) return;
+        if (isRefreshing || disableQuotaQuery) return;
         setIsRefreshing(true);
         try {
             if (activeTab === 'pool') {
@@ -255,7 +257,7 @@ export default function MiniView() {
     handleRefreshRef.current = handleRefresh;
 
     useEffect(() => {
-        if (!config?.auto_refresh || !config?.refresh_interval || config.refresh_interval <= 0) return;
+        if (disableQuotaQuery || !config?.auto_refresh || !config?.refresh_interval || config.refresh_interval <= 0) return;
 
         const intervalId = setInterval(() => {
             // [Fix #3757] 当悬浮窗收起或处于后台隐藏态时跳过定时刷新，避免 500 个账号下的 IPC 数据颠簸
@@ -266,7 +268,7 @@ export default function MiniView() {
         }, config.refresh_interval * 60 * 1000);
 
         return () => clearInterval(intervalId);
-    }, [config?.auto_refresh, config?.refresh_interval]);
+    }, [disableQuotaQuery, config?.auto_refresh, config?.refresh_interval]);
 
     useEffect(() => {
         if (isTauri()) {
@@ -711,8 +713,18 @@ export default function MiniView() {
                         data-tauri-drag-region="false"
                         onMouseDown={(e) => e.stopPropagation()}
                         onClick={handleRefresh}
-                        className="p-1 rounded-lg text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] transition-colors cursor-pointer outline-none focus:outline-none focus:ring-0 focus-visible:ring-0"
-                        title={t('common.refresh', '刷新当前额度')}
+                        disabled={isRefreshing || disableQuotaQuery}
+                        className={clsx(
+                            "p-1 rounded-lg transition-colors outline-none focus:outline-none focus:ring-0 focus-visible:ring-0",
+                            isRefreshing || disableQuotaQuery
+                                ? "text-gray-300 dark:text-gray-600 cursor-not-allowed opacity-60"
+                                : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-black/[0.04] dark:hover:bg-white/[0.08] cursor-pointer"
+                        )}
+                        title={
+                            disableQuotaQuery
+                                ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                : t('common.refresh', '刷新当前额度')
+                        }
                     >
                         <RefreshCw size={13} className={clsx(isRefreshing && "animate-spin text-blue-500")} />
                     </button>

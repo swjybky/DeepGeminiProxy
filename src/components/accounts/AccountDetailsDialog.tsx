@@ -6,6 +6,7 @@ import { formatDate, formatTimeRemaining } from '../../utils/format';
 import { useTranslation } from 'react-i18next';
 import { MODEL_CONFIG, sortModels } from '../../config/modelConfig';
 import { showToast } from '../common/ToastContainer';
+import { useConfigStore } from '../../stores/useConfigStore';
 
 interface AccountDetailsDialogProps {
     account: Account | null;
@@ -23,6 +24,8 @@ export default function AccountDetailsDialog({
     onAutoFetchProjectId,
 }: AccountDetailsDialogProps) {
     const { t } = useTranslation();
+    const { config } = useConfigStore();
+    const disableQuotaQuery = !!config?.disable_quota_query;
     const [activeTab, setActiveTab] = useState<'basic' | 'detailed'>('basic');
     const [priorityInput, setPriorityInput] = useState('50');
     const [savingPriority, setSavingPriority] = useState(false);
@@ -97,6 +100,13 @@ export default function AccountDetailsDialog({
 
     const autoFetchProjectId = async () => {
         if (!onAutoFetchProjectId) return;
+        if (disableQuotaQuery) {
+            showToast(
+                t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+                'info'
+            );
+            return;
+        }
         setFetchingProjectId(true);
         try {
             const fetched = await onAutoFetchProjectId(account.id);
@@ -243,8 +253,12 @@ export default function AccountDetailsDialog({
                                 <button
                                     className="btn btn-outline btn-sm px-2.5 text-xs"
                                     onClick={autoFetchProjectId}
-                                    disabled={savingProjectId || fetchingProjectId}
-                                    title={t('accounts.auto_fetch_project_id', '自动获取')}
+                                    disabled={savingProjectId || fetchingProjectId || disableQuotaQuery}
+                                    title={
+                                        disableQuotaQuery
+                                            ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                            : t('accounts.auto_fetch_project_id', '自动获取')
+                                    }
                                 >
                                     {fetchingProjectId ? (
                                         <span className="loading loading-spinner loading-xs" />

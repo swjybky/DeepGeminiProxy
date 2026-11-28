@@ -507,6 +507,12 @@ pub fn create_tray(app: &tauri::AppHandle) -> tauri::Result<()> {
                 }
                 "refresh_curr" => {
                     tauri::async_runtime::spawn(async move {
+                        if modules::quota::is_quota_query_disabled() {
+                            modules::logger::log_info(
+                                "[Tray] Skipping current account quota refresh (disable_quota_query is enabled)",
+                            );
+                            return;
+                        }
                         if let Ok(Some(account_id)) = modules::get_current_account_id() {
                             let _ = app_handle.emit("tray://refresh-current", ());
                             if let Ok(mut account) = modules::load_account(&account_id) {
@@ -729,7 +735,7 @@ pub fn update_tray_menus(app: &tauri::AppHandle) {
                 &app_handle_for_main,
                 "refresh_curr",
                 &texts.refresh_current,
-                true,
+                !config.disable_quota_query,
                 None::<&str>,
             );
 

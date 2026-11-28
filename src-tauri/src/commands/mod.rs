@@ -315,6 +315,14 @@ async fn internal_refresh_account_quota(
     app: &tauri::AppHandle,
     account: &mut Account,
 ) -> Result<QuotaData, String> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        modules::logger::log_info(&format!(
+            "[Quota] Skipping auto quota refresh for {} (disable_quota_query is enabled)",
+            account.email
+        ));
+        return Err(crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     modules::logger::log_info(&format!("自动触发刷新配额: {}", account.email));
 
     // 使用带重试的查询 (Shared logic)
@@ -340,6 +348,16 @@ pub async fn fetch_account_quota(
     proxy_state: tauri::State<'_, crate::commands::proxy::ProxyServiceState>,
     account_id: String,
 ) -> crate::error::AppResult<QuotaData> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        modules::logger::log_info(&format!(
+            "[Quota] Skipping manual quota query for {} (disable_quota_query is enabled)",
+            account_id
+        ));
+        return Err(crate::error::AppError::Config(
+            crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+        ));
+    }
+
     modules::logger::log_info(&format!("手动刷新配额请求: {}", account_id));
     let mut account =
         modules::load_account(&account_id).map_err(crate::error::AppError::Account)?;
@@ -395,6 +413,13 @@ pub async fn refresh_all_quotas_internal(
     proxy_state: &crate::commands::proxy::ProxyServiceState,
     app_handle: Option<tauri::AppHandle>,
 ) -> Result<RefreshStats, String> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        modules::logger::log_info(
+            "[Quota] Skipping refresh_all_quotas_internal (disable_quota_query is enabled)",
+        );
+        return Err(crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     let stats = modules::account::refresh_all_quotas_logic().await?;
 
     // 同步到运行中的反代服务（如果已启动）
@@ -555,6 +580,7 @@ pub async fn save_config(
 
     // 通知所有窗口配置已更新，并跨窗口广播主题与语言变更
     let _ = app.emit("config://updated", ());
+    crate::modules::tray::update_tray_menus(&app);
     let _ = app.emit(
         "app://theme-changed",
         serde_json::json!({ "theme": config.theme.clone() }),

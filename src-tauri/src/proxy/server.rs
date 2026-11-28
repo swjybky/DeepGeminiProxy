@@ -1848,6 +1848,18 @@ async fn admin_switch_account(
 
 async fn admin_refresh_all_quotas() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)>
 {
+    if crate::modules::quota::is_quota_query_disabled() {
+        logger::log_info(
+            "[API] Skipping refresh of all account quotas (disable_quota_query is enabled)",
+        );
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+            }),
+        ));
+    }
+
     logger::log_info("[API] Starting refresh of all account quotas");
     let stats = account::refresh_all_quotas_logic().await.map_err(|e| {
         (
@@ -3505,6 +3517,19 @@ async fn admin_reorder_accounts(
 async fn admin_fetch_account_quota(
     Path(account_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        logger::log_info(&format!(
+            "[API] Skipping quota query for {} (disable_quota_query is enabled)",
+            account_id
+        ));
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+            }),
+        ));
+    }
+
     let mut account = crate::modules::load_account(&account_id).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -3593,6 +3618,16 @@ async fn admin_toggle_proxy_status(
 
 async fn admin_warm_up_all_accounts() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)>
 {
+    if crate::modules::quota::is_quota_query_disabled() {
+        logger::log_info("[API] Skipping warm_up_all_accounts (disable_quota_query is enabled)");
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+            }),
+        ));
+    }
+
     let result = crate::commands::warm_up_all_accounts().await.map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -3605,6 +3640,19 @@ async fn admin_warm_up_all_accounts() -> Result<impl IntoResponse, (StatusCode, 
 async fn admin_warm_up_account(
     Path(account_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        logger::log_info(&format!(
+            "[API] Skipping warm_up_account for {} (disable_quota_query is enabled)",
+            account_id
+        ));
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+            }),
+        ));
+    }
+
     let result = crate::commands::warm_up_account(account_id)
         .await
         .map_err(|e| {

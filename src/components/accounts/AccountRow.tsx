@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { formatCompactDuration, getLiveLimitForModel, getLiveLimitState } from '../../utils/liveLimit';
 import { getModelProtectionKey, findQuotaModel, findImageQuotaModel } from '../../config/modelConfig';
 import { QoSStatusBadge } from './QoSStatusBadge';
+import { useConfigStore } from '../../stores/useConfigStore';
 
 interface AccountRowProps {
     account: Account;
@@ -27,6 +28,8 @@ interface AccountRowProps {
 
 function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSwitching = false, onSwitch, onRefresh, onViewDetails, onExport, onDelete, onToggleProxy, onViewDevice }: AccountRowProps) {
     const { t } = useTranslation();
+    const { config } = useConfigStore();
+    const disableQuotaQuery = !!config?.disable_quota_query;
     // [重构] 按优先级查找配额模型
     const geminiProModel = findQuotaModel(account.quota?.models, 'gemini-pro');
     const geminiFlashModel = findQuotaModel(account.quota?.models, 'gemini-flash');
@@ -347,10 +350,14 @@ function AccountRow({ account, selected, onSelect, isCurrent, isRefreshing, isSw
                         <ArrowRightLeft className={`w-3.5 h-3.5 ${isSwitching ? 'animate-spin' : ''}`} />
                     </button>
                     <button
-                        className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${(isRefreshing || isDisabled) ? 'bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 cursor-not-allowed' : 'hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'}`}
+                        className={`p-1.5 text-gray-500 dark:text-gray-400 rounded-lg transition-all ${(isRefreshing || isDisabled || disableQuotaQuery) ? 'bg-green-50 dark:bg-green-900/10 text-green-600 dark:text-green-400 opacity-50 cursor-not-allowed' : 'hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30'}`}
                         onClick={(e) => { e.stopPropagation(); onRefresh(); }}
-                        title={isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.refreshing') : t('common.refresh'))}
-                        disabled={isRefreshing || isDisabled}
+                        title={
+                            disableQuotaQuery
+                                ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                : (isDisabled ? t('accounts.disabled_tooltip') : (isRefreshing ? t('common.refreshing') : t('common.refresh')))
+                        }
+                        disabled={isRefreshing || isDisabled || disableQuotaQuery}
                     >
                         <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                     </button>

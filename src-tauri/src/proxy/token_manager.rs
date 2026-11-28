@@ -410,6 +410,10 @@ impl TokenManager {
 
     /// 执行一次主动预刷新检查轮次
     async fn run_proactive_token_refresh_tick(&self) {
+        if crate::modules::quota::is_quota_query_disabled() {
+            return;
+        }
+
         let now = chrono::Utc::now().timestamp();
         const PROACTIVE_REFRESH_BUFFER_SECS: i64 = 600; // 提前10分钟预刷新
 
@@ -4588,6 +4592,14 @@ impl TokenManager {
         model: Option<String>,
         error_body: Option<&str>,
     ) -> bool {
+        if crate::modules::quota::is_quota_query_disabled() {
+            tracing::info!(
+                "账号 {} 跳过实时配额查询（已开启禁止查询限额），回退至本地限流策略",
+                email
+            );
+            return false;
+        }
+
         // 1. 从 tokens 中获取该账号的 access_token 和 account_id
         // 同时获取 account_id，确保锁定 key 与检查 key 一致
         let (access_token, account_id) = {

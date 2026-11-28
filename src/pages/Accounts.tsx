@@ -143,6 +143,13 @@ function Accounts() {
   const [errorAccountId, setErrorAccountId] = useState<string | null>(null);
 
   const handleWarmup = async (accountId: string) => {
+    if (config?.disable_quota_query) {
+      showToast(
+        t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+        'info'
+      );
+      return;
+    }
     setRefreshingIds((prev) => {
       const next = new Set(prev);
       next.add(accountId);
@@ -173,6 +180,13 @@ function Accounts() {
 
   const handleWarmupAll = async () => {
     setIsWarmupConfirmOpen(false);
+    if (config?.disable_quota_query) {
+      showToast(
+        t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+        'info'
+      );
+      return;
+    }
     setIsWarmuping(true);
     try {
       const isBatch = selectedIds.size > 0;
@@ -442,6 +456,13 @@ function Accounts() {
   };
 
   const handleRefresh = async (accountId: string) => {
+    if (config?.disable_quota_query) {
+      showToast(
+        t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+        'info'
+      );
+      return;
+    }
     setRefreshingIds((prev) => {
       const next = new Set(prev);
       next.add(accountId);
@@ -557,6 +578,13 @@ function Accounts() {
   const [isRefreshConfirmOpen, setIsRefreshConfirmOpen] = useState(false);
 
   const handleRefreshClick = () => {
+    if (config?.disable_quota_query) {
+      showToast(
+        t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+        'info'
+      );
+      return;
+    }
     setIsRefreshConfirmOpen(true);
   };
 
@@ -1119,13 +1147,15 @@ function Accounts() {
           )}
 
           <button
-            className={`px-2.5 py-2 bg-blue-500 text-white text-xs font-medium rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-1.5 shadow-sm ${isRefreshing ? "opacity-70 cursor-not-allowed" : ""}`}
+            className={`px-2.5 py-2 bg-blue-500 text-white text-xs font-medium rounded-lg hover:bg-blue-600 transition-colors flex items-center gap-1.5 shadow-sm ${(isRefreshing || config?.disable_quota_query) ? "opacity-60 cursor-not-allowed" : ""}`}
             onClick={handleRefreshClick}
-            disabled={isRefreshing}
+            disabled={isRefreshing || !!config?.disable_quota_query}
             title={
-              selectedIds.size > 0
-                ? t("accounts.refresh_selected", { count: selectedIds.size })
-                : t("accounts.refresh_all")
+              config?.disable_quota_query
+                ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                : selectedIds.size > 0
+                  ? t("accounts.refresh_selected", { count: selectedIds.size })
+                  : t("accounts.refresh_all")
             }
           >
             <RefreshCw
@@ -1141,13 +1171,24 @@ function Accounts() {
           </button>
 
           <button
-            className={`px-2.5 py-2 bg-orange-500 text-white text-xs font-medium rounded-lg hover:bg-orange-600 transition-colors flex items-center gap-1.5 shadow-sm ${isWarmuping ? "opacity-70 cursor-not-allowed" : ""}`}
-            onClick={() => setIsWarmupConfirmOpen(true)}
-            disabled={isWarmuping}
+            className={`px-2.5 py-2 bg-orange-500 text-white text-xs font-medium rounded-lg hover:bg-orange-600 transition-colors flex items-center gap-1.5 shadow-sm ${(isWarmuping || config?.disable_quota_query) ? "opacity-60 cursor-not-allowed" : ""}`}
+            onClick={() => {
+              if (config?.disable_quota_query) {
+                showToast(
+                  t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+                  'info'
+                );
+                return;
+              }
+              setIsWarmupConfirmOpen(true);
+            }}
+            disabled={isWarmuping || !!config?.disable_quota_query}
             title={
-              selectedIds.size > 0
-                ? t("accounts.warmup_selected", { count: selectedIds.size })
-                : t("accounts.warmup_all", "一键预热所有账号")
+              config?.disable_quota_query
+                ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                : selectedIds.size > 0
+                  ? t("accounts.warmup_selected", { count: selectedIds.size })
+                  : t("accounts.warmup_all", "一键预热所有账号")
             }
           >
             <Sparkles

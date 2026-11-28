@@ -1813,6 +1813,14 @@ pub fn update_account_project_id(
 
 /// Automatically fetch and associate Project ID from upstream for a given account.
 pub async fn auto_fetch_account_project_id(account_id: &str) -> Result<String, String> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        crate::modules::logger::log_info(&format!(
+            "[Quota] Skipping auto_fetch_account_project_id for {} (disable_quota_query is enabled)",
+            account_id
+        ));
+        return Err(crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
+
     let mut account = load_account(account_id)?;
 
     // Ensure access token is valid before querying upstream
@@ -3312,6 +3320,16 @@ pub async fn fetch_quota_with_retry(account: &mut Account) -> crate::error::AppR
     use crate::error::AppError;
     use crate::modules::oauth;
 
+    if crate::modules::quota::is_quota_query_disabled() {
+        modules::logger::log_info(&format!(
+            "[Quota] Skipping quota refresh for {} (disable_quota_query is enabled)",
+            account.email
+        ));
+        return Err(AppError::Config(
+            crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+        ));
+    }
+
     // 1. Time-based check - ensure Token is valid first
     let token = match oauth::ensure_fresh_token(&account.token, Some(&account.id)).await {
         Ok(t) => t,
@@ -3575,6 +3593,13 @@ pub async fn refresh_all_quotas_logic() -> Result<RefreshStats, String> {
     use futures::stream::{self, StreamExt};
     use std::sync::Arc;
     use tokio::sync::Semaphore;
+
+    if crate::modules::quota::is_quota_query_disabled() {
+        crate::modules::logger::log_info(
+            "[Quota] Skipping batch quota refresh (disable_quota_query is enabled)",
+        );
+        return Err(crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string());
+    }
 
     const MAX_CONCURRENT: usize = 5;
     let start = std::time::Instant::now();
@@ -3936,12 +3961,22 @@ pub async fn batch_import_accounts_logic(
                             .await
                             .ok();
 
-                    let quota_res = crate::modules::quota::fetch_quota(
-                        &token_res.access_token,
-                        &real_email,
-                        Some(&account_id),
-                    )
-                    .await;
+                    let quota_res = if crate::modules::quota::is_quota_query_disabled() {
+                        crate::modules::logger::log_info(&format!(
+                            "[Quota] Skipping batch-import quota fetch for {} (disable_quota_query is enabled)",
+                            real_email
+                        ));
+                        Err(crate::error::AppError::Config(
+                            crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+                        ))
+                    } else {
+                        crate::modules::quota::fetch_quota(
+                            &token_res.access_token,
+                            &real_email,
+                            Some(&account_id),
+                        )
+                        .await
+                    };
 
                     let is_gcp_tos = if crate::modules::oauth::is_gcp_enterprise_client(
                         token_res.oauth_client_key.as_deref(),

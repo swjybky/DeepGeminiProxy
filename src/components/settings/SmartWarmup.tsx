@@ -7,9 +7,10 @@ import { MODEL_CONFIG } from '../../config/modelConfig';
 interface SmartWarmupProps {
     config: ScheduledWarmupConfig;
     onChange: (config: ScheduledWarmupConfig) => void;
+    disabled?: boolean;
 }
 
-const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange }) => {
+const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange, disabled = false }) => {
     const { t } = useTranslation();
 
     const uniqueLabels = new Set<string>();
@@ -27,6 +28,7 @@ const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange }) => {
         }));
 
     const handleEnabledChange = (enabled: boolean) => {
+        if (disabled) return;
         let newConfig = { ...config, enabled };
         // 如果开启预热且勾选列表为空，则默认勾选所有核心模型
         if (enabled && (!config.monitored_models || config.monitored_models.length === 0)) {
@@ -36,6 +38,7 @@ const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange }) => {
     };
 
     const toggleModel = (model: string) => {
+        if (disabled) return;
         const currentModels = config.monitored_models || [];
         let newModels: string[];
 
@@ -69,11 +72,12 @@ const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange }) => {
                         </p>
                     </div>
                 </div>
-                <label className="relative inline-flex items-center cursor-pointer">
+                <label className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                     <input
                         type="checkbox"
                         className="sr-only peer"
                         checked={config.enabled}
+                        disabled={disabled}
                         onChange={(e) => handleEnabledChange(e.target.checked)}
                     />
                     <div className="w-11 h-6 bg-gray-200 dark:bg-base-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-500 shadow-inner"></div>
@@ -95,7 +99,8 @@ const SmartWarmup: React.FC<SmartWarmupProps> = ({ config, onChange }) => {
                                             key={model.id}
                                             onClick={() => toggleModel(model.id)}
                                             className={`
-                                                flex items-center justify-between p-2 rounded-lg border cursor-pointer transition-all duration-200
+                                                flex items-center justify-between p-2 rounded-lg border transition-all duration-200
+                                                ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}
                                                 ${isSelected
                                                     ? 'bg-orange-50 dark:bg-orange-900/10 border-orange-200 dark:border-orange-800/50 text-orange-700 dark:text-orange-400'
                                                     : 'bg-gray-50/50 dark:bg-base-200/50 border-gray-100 dark:border-base-300/50 text-gray-500 hover:border-gray-200 dark:hover:border-base-300'}

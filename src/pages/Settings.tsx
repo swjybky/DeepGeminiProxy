@@ -52,6 +52,7 @@ function Settings() {
         theme: 'system',
         auto_refresh: false,
         refresh_interval: 10,
+        disable_quota_query: false,
         auto_sync: false,
         sync_interval: 5,
         auto_switch_classic_depleted: false,
@@ -986,6 +987,12 @@ function Settings() {
                     {/* 账号设置 */}
                     {activeTab === 'account' && (
                         <div className="space-y-4 animate-in fade-in duration-500">
+                            {formData.disable_quota_query && (
+                                <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50/70 dark:bg-rose-950/20 px-4 py-3 text-xs font-medium text-rose-700 dark:text-rose-300">
+                                    {t('dashboard.disable_quota_query_enabled_tip', '当前：已禁止查询限额。手动刷新、自动刷新及后台配额拉取均已暂停（点击关闭）')}
+                                </div>
+                            )}
+
                             {/* 自动刷新配额 */}
                             <div className="group bg-white dark:bg-base-100 rounded-xl p-5 border border-gray-100 dark:border-base-200 hover:border-blue-200 transition-all duration-300 shadow-sm">
                                 <div className="flex items-center justify-between">
@@ -998,12 +1005,12 @@ function Settings() {
                                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('settings.account.auto_refresh_desc')}</p>
                                         </div>
                                     </div>
-                                    <label className={`relative inline-flex items-center ${formData.quota_protection.enabled ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}>
+                                    <label className={`relative inline-flex items-center ${(formData.quota_protection.enabled || !!formData.disable_quota_query) ? 'cursor-not-allowed opacity-70' : 'cursor-pointer'}`}>
                                         <input
                                             type="checkbox"
                                             className="sr-only peer"
                                             checked={formData.auto_refresh}
-                                            disabled={formData.quota_protection.enabled}
+                                            disabled={formData.quota_protection.enabled || !!formData.disable_quota_query}
                                             onChange={async (e) => {
                                                 const enabled = e.target.checked;
                                                 const newConfig = { ...formData, auto_refresh: enabled };
@@ -1025,9 +1032,10 @@ function Settings() {
                                     <div className="relative">
                                         <input
                                             type="number"
-                                            className="w-24 px-3 py-2 bg-gray-50 dark:bg-base-200 border border-gray-100 dark:border-base-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold text-blue-600 dark:text-blue-400"
+                                            className="w-24 px-3 py-2 bg-gray-50 dark:bg-base-200 border border-gray-100 dark:border-base-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-bold text-blue-600 dark:text-blue-400 disabled:opacity-60 disabled:cursor-not-allowed"
                                             min="1"
                                             max="35791"
+                                            disabled={!!formData.disable_quota_query}
                                             value={formData.refresh_interval}
                                             onChange={(e) => setFormData({ ...formData, refresh_interval: isNaN(parseInt(e.target.value)) ? 1 : Math.min(Math.max(parseInt(e.target.value), 1), 35791) })}
                                         />
@@ -1059,6 +1067,7 @@ function Settings() {
                             <div className="group bg-white dark:bg-base-100 rounded-xl p-5 border border-gray-100 dark:border-base-200 hover:border-orange-200 transition-all duration-300 shadow-sm">
                                 <SmartWarmup
                                     config={formData.scheduled_warmup}
+                                    disabled={!!formData.disable_quota_query}
                                     onChange={async (newConfig) => {
                                         const newFormData = {
                                             ...formData,

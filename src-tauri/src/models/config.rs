@@ -9,6 +9,9 @@ pub struct AppConfig {
     pub theme: String,
     pub auto_refresh: bool,
     pub refresh_interval: i32, // minutes
+    /// 禁止查询上游配额开关（开启后跳过所有手动与自动配额拉取，保留现有缓存配额）
+    #[serde(default)]
+    pub disable_quota_query: bool,
     pub auto_sync: bool,
     pub sync_interval: i32, // minutes
     pub default_export_path: Option<String>,
@@ -249,6 +252,7 @@ impl AppConfig {
             theme: "system".to_string(),
             auto_refresh: true,
             refresh_interval: 10,
+            disable_quota_query: false,
             auto_sync: false,
             sync_interval: 5,
             default_export_path: None,
@@ -323,5 +327,21 @@ mod tests {
         let saved = serde_json::to_string(&config).unwrap();
         let restored: AppConfig = serde_json::from_str(&saved).unwrap();
         assert_eq!(restored.tray_click_action, "main");
+    }
+
+    #[test]
+    fn disable_quota_query_defaults_to_false_when_missing() {
+        let mut config = AppConfig::new();
+        assert!(!config.disable_quota_query);
+
+        config.disable_quota_query = true;
+        let mut value = serde_json::to_value(&config).unwrap();
+        value.as_object_mut().unwrap().remove("disable_quota_query");
+        let restored: AppConfig = serde_json::from_value(value).unwrap();
+        assert!(!restored.disable_quota_query);
+
+        let saved = serde_json::to_string(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&saved).unwrap();
+        assert!(restored.disable_quota_query);
     }
 }

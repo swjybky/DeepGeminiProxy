@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { Account, ActiveClientsStatus } from '../types/account';
 import * as accountService from '../services/accountService';
+import { useConfigStore } from './useConfigStore';
+
+const ensureQuotaQueryAllowed = () => {
+    if (useConfigStore.getState().config?.disable_quota_query) {
+        throw new Error('Quota query is disabled');
+    }
+};
 
 interface AccountState {
     accounts: Account[];
@@ -194,6 +201,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     refreshQuota: async (accountId: string) => {
+        ensureQuotaQueryAllowed();
         set({ loading: true, error: null });
         try {
             await accountService.fetchAccountQuota(accountId);
@@ -206,6 +214,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     refreshAllQuotas: async () => {
+        ensureQuotaQueryAllowed();
         set({ loading: true, error: null });
         try {
             const stats = await accountService.refreshAllQuotas();
@@ -362,6 +371,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     warmUpAccounts: async () => {
+        ensureQuotaQueryAllowed();
         set({ loading: true, error: null });
         try {
             const result = await accountService.warmUpAllAccounts();
@@ -376,6 +386,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     warmUpAccount: async (accountId: string) => {
+        ensureQuotaQueryAllowed();
         set({ loading: true, error: null });
         try {
             const result = await accountService.warmUpAccount(accountId);
@@ -413,6 +424,7 @@ export const useAccountStore = create<AccountState>((set, get) => ({
     },
 
     autoFetchAccountProjectId: async (accountId) => {
+        ensureQuotaQueryAllowed();
         const projectId = await accountService.autoFetchAccountProjectId(accountId);
         set(state => ({
             accounts: state.accounts.map(account =>

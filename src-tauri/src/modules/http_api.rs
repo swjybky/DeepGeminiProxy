@@ -414,6 +414,18 @@ async fn switch_account(
 
 /// POST /accounts/refresh - Refresh all quotas
 async fn refresh_all_quotas() -> Result<impl IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    if crate::modules::quota::is_quota_query_disabled() {
+        logger::log_info(
+            "[HTTP API] Skipping refresh of all account quotas (disable_quota_query is enabled)",
+        );
+        return Err((
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+            }),
+        ));
+    }
+
     logger::log_info("[HTTP API] Starting refresh of all account quotas");
 
     // Execute refresh asynchronously

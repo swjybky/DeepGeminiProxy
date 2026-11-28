@@ -63,6 +63,30 @@ pub async fn handle_warmup(
     State(state): State<AppState>,
     Json(req): Json<WarmupRequest>,
 ) -> Response {
+    if crate::modules::quota::is_quota_query_disabled() {
+        info!(
+            "[Warmup-API] Skipping warmup for {} (disable_quota_query is enabled)",
+            req.email
+        );
+        return (
+            StatusCode::CONFLICT,
+            Json(WarmupResponse {
+                success: false,
+                message: crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string(),
+                log_id: None,
+                duration_ms: Some(0),
+                status: Some(StatusCode::CONFLICT.as_u16()),
+                account_email: Some(req.email),
+                account_id: req.account_id,
+                is_retired: None,
+                error: Some(crate::modules::quota::QUOTA_QUERY_DISABLED_ERROR.to_string()),
+                is_server_error: Some(false),
+                error_type: Some("quota_query_disabled".to_string()),
+            }),
+        )
+            .into_response();
+    }
+
     let start_time = std::time::Instant::now();
 
     let mapped_model = {

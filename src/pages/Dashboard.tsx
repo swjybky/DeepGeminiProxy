@@ -3,6 +3,7 @@ import {
     Activity,
     AlertTriangle,
     ArrowRight,
+    Ban,
     Bot,
     Calendar,
     Clock,
@@ -42,6 +43,7 @@ function Dashboard() {
     } = useAccountStore();
     const { config, saveConfig } = useConfigStore();
     const qosAutoJail = !!config?.proxy?.qos_auto_jail;
+    const disableQuotaQuery = !!config?.disable_quota_query;
     const refreshAppAccounts = useGeminiAppAccounts(state => state.refresh);
     useEffect(() => {
         const refresh = () => { void refreshAppAccounts().catch(() => {}); };
@@ -69,6 +71,26 @@ function Dashboard() {
             );
         } catch (err) {
             console.error('Failed to update QoS auto jail setting:', err);
+        }
+    };
+
+    const handleToggleDisableQuotaQuery = async () => {
+        if (!config) return;
+        const nextVal = !disableQuotaQuery;
+        try {
+            await saveConfig({
+                ...config,
+                disable_quota_query: nextVal,
+            });
+            showToast(
+                nextVal
+                    ? t('dashboard.disable_quota_query_on', '禁止查询限额: 开')
+                    : t('dashboard.disable_quota_query_off', '禁止查询限额: 关'),
+                'info'
+            );
+        } catch (err) {
+            console.error('Failed to update disable quota query setting:', err);
+            showToast(`${t('common.error')}: ${err}`, 'error');
         }
     };
 
@@ -376,6 +398,13 @@ function Dashboard() {
 
     const handleRefreshCurrent = async () => {
         if (!currentAccount) return;
+        if (disableQuotaQuery) {
+            showToast(
+                t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关'),
+                'info'
+            );
+            return;
+        }
 
         setIsRefreshing(true);
         try {
@@ -414,10 +443,14 @@ function Dashboard() {
                     {/* 刷新额度与添加账号操作 */}
                     <div className="flex items-center gap-2">
                         <button
-                            className={`px-3 py-1.5 bg-blue-500 text-white text-xs font-medium rounded-xl hover:bg-blue-600 transition-colors flex items-center gap-1.5 shadow-sm ${isRefreshing || !currentAccount ? 'opacity-70 cursor-not-allowed' : ''}`}
+                            className={`px-3 py-1.5 bg-blue-500 text-white text-xs font-medium rounded-xl hover:bg-blue-600 transition-colors flex items-center gap-1.5 shadow-sm ${(isRefreshing || !currentAccount || disableQuotaQuery) ? 'opacity-60 cursor-not-allowed' : ''}`}
                             onClick={handleRefreshCurrent}
-                            disabled={isRefreshing || !currentAccount}
-                            title={isRefreshing ? t('dashboard.refreshing') : t('dashboard.refresh_quota')}
+                            disabled={isRefreshing || !currentAccount || disableQuotaQuery}
+                            title={
+                                disableQuotaQuery
+                                    ? t('dashboard.disable_quota_query_blocked_toast', '已开启禁止查询限额，请先关闭该开关')
+                                    : (isRefreshing ? t('dashboard.refreshing') : t('dashboard.refresh_quota'))
+                            }
                         >
                             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                             <span className="hidden sm:inline">{isRefreshing ? t('dashboard.refreshing') : t('dashboard.refresh_quota')}</span>
@@ -525,6 +558,38 @@ function Dashboard() {
                                         : 'bg-gray-200 dark:bg-white/[0.08] text-gray-400 dark:text-zinc-500'
                                 }`}>
                                     {qosAutoJail ? t('dashboard.qos_auto_jail_badge_on', '开') : t('dashboard.qos_auto_jail_badge_off', '关')}
+                                </span>
+                            </button>
+                        </div>
+
+                        {/* 5. 禁止查询限额开关 */}
+                        <div className="flex items-center bg-gray-100 dark:bg-white/[0.04] p-1 rounded-xl text-xs dark:border dark:border-white/[0.08]">
+                            <button
+                                type="button"
+                                onClick={handleToggleDisableQuotaQuery}
+                                disabled={!config}
+                                aria-pressed={disableQuotaQuery}
+                                className={`px-2.5 py-1 rounded-lg font-medium transition-all flex items-center gap-1.5 ${
+                                    !config ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'
+                                } ${
+                                    disableQuotaQuery
+                                        ? 'bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-300 shadow-sm font-bold dark:border dark:border-white/[0.12]'
+                                        : 'text-gray-500 dark:text-zinc-400 hover:text-gray-800 dark:hover:text-zinc-200'
+                                }`}
+                                title={
+                                    disableQuotaQuery
+                                        ? t('dashboard.disable_quota_query_enabled_tip', '当前：已禁止查询限额。手动刷新、自动刷新及后台配额拉取均已暂停（点击关闭）')
+                                        : t('dashboard.disable_quota_query_disabled_tip', '当前：允许查询限额。开启后将禁止所有手动与自动拉取账号配额请求（点击开启）')
+                                }
+                            >
+                                <Ban className={`w-3.5 h-3.5 ${disableQuotaQuery ? 'text-rose-500 dark:text-rose-400' : 'text-gray-400 dark:text-zinc-500'}`} />
+                                <span>{t('dashboard.disable_quota_query', '禁止查询限额')}</span>
+                                <span className={`text-[10px] px-1 py-0.5 rounded font-mono ${
+                                    disableQuotaQuery
+                                        ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 font-bold'
+                                        : 'bg-gray-200 dark:bg-white/[0.08] text-gray-400 dark:text-zinc-500'
+                                }`}>
+                                    {disableQuotaQuery ? t('dashboard.disable_quota_query_badge_on', '开') : t('dashboard.disable_quota_query_badge_off', '关')}
                                 </span>
                             </button>
                         </div>

@@ -128,8 +128,8 @@ pub fn start_scheduler(
                 continue;
             };
 
-            // Must be enabled by user in Settings
-            if !app_config.scheduled_warmup.enabled {
+            // Must be enabled by user in Settings (and quota queries must not be disabled)
+            if !app_config.scheduled_warmup.enabled || app_config.disable_quota_query {
                 continue;
             }
 
@@ -328,6 +328,14 @@ pub fn start_scheduler(
 
 /// Trigger immediate smart warmup check for a single account (e.g. on manual trigger / recovered event)
 pub async fn trigger_warmup_for_account(account: &Account) {
+    let Ok(app_config) = config::load_app_config() else {
+        return;
+    };
+
+    if !app_config.scheduled_warmup.enabled || app_config.disable_quota_query {
+        return;
+    }
+
     let Ok((token, pid)) = quota::get_valid_token_for_warmup(account).await else {
         return;
     };
@@ -339,14 +347,6 @@ pub async fn trigger_warmup_for_account(account: &Account) {
     };
 
     if fresh_quota.is_forbidden {
-        return;
-    }
-
-    let Ok(app_config) = config::load_app_config() else {
-        return;
-    };
-
-    if !app_config.scheduled_warmup.enabled {
         return;
     }
 

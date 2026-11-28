@@ -15,11 +15,17 @@ function BackgroundTaskRunner() {
         if (!config) return;
 
         let intervalId: ReturnType<typeof setTimeout> | null = null;
-        const { auto_refresh, refresh_interval } = config;
+        const { auto_refresh, refresh_interval, disable_quota_query } = config;
 
         // [FIX #3726] 仅在用户手动从关闭 (false) 切换为开启 (true) 时触发即时刷新，应用初始启动挂载时绝不立即全量轰炸
         const isFirstMount = !hasMountedRef.current;
         hasMountedRef.current = true;
+
+        if (disable_quota_query) {
+            prevAutoRefreshRef.current = auto_refresh;
+            console.log('[BackgroundTask] Quota query is disabled, skipping auto-refresh');
+            return;
+        }
 
         if (auto_refresh && !prevAutoRefreshRef.current && !isFirstMount) {
             console.log('[BackgroundTask] Auto-refresh manually toggled on, executing once...');
@@ -41,7 +47,7 @@ function BackgroundTaskRunner() {
                 clearInterval(intervalId);
             }
         };
-    }, [config?.auto_refresh, config?.refresh_interval]);
+    }, [config?.auto_refresh, config?.refresh_interval, config?.disable_quota_query]);
 
     // Render nothing
     return null;

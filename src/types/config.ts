@@ -205,6 +205,7 @@ export interface AppConfig {
     theme: string;
     auto_refresh: boolean;
     refresh_interval: number;
+    disable_quota_query?: boolean;
     auto_sync: boolean;
     sync_interval: number;
     auto_switch_classic_depleted?: boolean; // [NEW] 兼容旧版开关

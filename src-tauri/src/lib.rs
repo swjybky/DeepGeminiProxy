@@ -473,6 +473,28 @@ pub fn run() {
                         }
                     }
 
+                    if let Ok(raw_disable_quota) = std::env::var("ABV_DISABLE_QUOTA_QUERY") {
+                        let parsed = match raw_disable_quota.trim().to_lowercase().as_str() {
+                            "1" | "true" | "yes" | "on" => Some(true),
+                            "0" | "false" | "no" | "off" => Some(false),
+                            _ => {
+                                warn!(
+                                    "Invalid ABV_DISABLE_QUOTA_QUERY: {}, ignoring",
+                                    raw_disable_quota
+                                );
+                                None
+                            }
+                        };
+                        if let Some(disabled) = parsed {
+                            info!(
+                                "Using disable_quota_query from environment variable: {}",
+                                disabled
+                            );
+                            config.disable_quota_query = disabled;
+                            modified = true;
+                        }
+                    }
+
                     info!("--------------------------------------------------");
                     info!("🚀 Headless mode proxy service starting...");
                     info!("📍 Port: {}", config.proxy.port);
